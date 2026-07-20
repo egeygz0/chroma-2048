@@ -1,15 +1,15 @@
 --[[
-	CHROMA 2048 — sunucu (ServerScriptService > Script)
+	NEON MERGE 2048 — sunucu (ServerScriptService > Script)
 
 	Gorevi: oyuncu verisinin kalici kaydi (DataStoreService).
-	- Giriste kayit yuklenir, istemci CH_GetData (RemoteFunction) ile ceker.
-	- Istemci her hamlede CH_Save (RemoteEvent) ile durumunu gonderir;
+	- Giriste kayit yuklenir, istemci NM_GetData (RemoteFunction) ile ceker.
+	- Istemci her hamlede NM_Save (RemoteEvent) ile durumunu gonderir;
 	  sunucu dogrular, bellekte tutar.
 	- DataStore yazimi: 30 sn'de bir (degistiyse) + cikista + sunucu kapanisinda.
 	- Dogrulama: tahta 4x4 ve degerler 2'nin kuvveti, skor tavanli, tema enum.
 	  Best skoru sunucu hesaplar (max eski best, gelen skor).
 
-	Kayit anahtari: Chroma2048Save_v1 / "u_<UserId>"
+	Kayit anahtari: NeonMerge2048Save_v1 / "u_<UserId>"
 	NOT: MainGame.client.lua ile birlikte guncelle.
 ]]
 
@@ -18,7 +18,7 @@ local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService        = game:GetService("RunService")
 
-local STORE_NAME        = "Chroma2048Save_v1"
+local STORE_NAME        = "NeonMerge2048Save_v1"
 local AUTOSAVE_INTERVAL = 30       -- sn
 local MIN_WRITE_GAP     = 6        -- ayni oyuncuya iki yazim arasi en az sure
 local MAX_SCORE         = 4_000_000 -- 4x4 2048'de teorik skor tavaninin ustu
@@ -30,11 +30,11 @@ local store = DataStoreService:GetDataStore(STORE_NAME)
 -- Remotes
 -- ========================================================================
 local GetData = Instance.new("RemoteFunction")
-GetData.Name = "CH_GetData"
+GetData.Name = "NM_GetData"
 GetData.Parent = ReplicatedStorage
 
 local SaveEvent = Instance.new("RemoteEvent")
-SaveEvent.Name = "CH_Save"
+SaveEvent.Name = "NM_Save"
 SaveEvent.Parent = ReplicatedStorage
 
 -- ========================================================================
@@ -101,7 +101,7 @@ local function loadData(userId)
 			end
 			return deepCopy(DEFAULT_DATA)
 		end
-		warn(("[Chroma2048] Yukleme denemesi %d basarisiz (%s): %s"):format(attempt, userId, tostring(result)))
+		warn(("[NeonMerge2048] Yukleme denemesi %d basarisiz (%s): %s"):format(attempt, userId, tostring(result)))
 		task.wait(attempt)
 	end
 	return deepCopy(DEFAULT_DATA)
@@ -115,7 +115,7 @@ local function writeData(userId, data)
 			end)
 		end)
 		if ok then return true end
-		warn(("[Chroma2048] Yazma denemesi %d basarisiz (%s): %s"):format(attempt, userId, tostring(err)))
+		warn(("[NeonMerge2048] Yazma denemesi %d basarisiz (%s): %s"):format(attempt, userId, tostring(err)))
 		task.wait(attempt)
 	end
 	return false

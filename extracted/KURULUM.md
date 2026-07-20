@@ -1,10 +1,10 @@
-# Chroma 2048 v2 — Kurulum ve Rehber
+# Neon Merge 2048 v2 — Kurulum ve Rehber
 
 ## Kurulum
 
 1. Roblox Studio'da yerini aç (Baseplate yeterli).
 2. **StarterPlayer > StarterPlayerScripts** içine bir **LocalScript** ekle, içeriğini `MainGame.client.lua` ile tamamen değiştir.
-3. **ServerScriptService** içine bir **Script** ekle, içeriğini `Server.server.lua` ile değiştir (kayıt sistemi burada; bu betik olmadan istemci `CH_GetData` beklerken takılır).
+3. **ServerScriptService** içine bir **Script** ekle, içeriğini `Server.server.lua` ile değiştir (kayıt sistemi burada; bu betik olmadan istemci `NM_GetData` beklerken takılır).
 4. **Play** (F5).
 
 ## Kayıt Sistemi (Database) Nasıl Çalışır?
@@ -16,12 +16,12 @@ Roblox'ta "database" = **DataStoreService**. Kurulumu:
 
 Akış:
 
-- Oyuncu girince sunucu kaydı yükler; istemci `CH_GetData` (RemoteFunction) ile çeker. Kayıtta yarım kalmış geçerli bir tahta varsa oyun **kaldığı yerden** devam eder; yoksa temiz başlar (en iyi skor her durumda korunur).
-- İstemci her hamlede, restart'ta ve tema değişiminde durumunu `CH_Save` (RemoteEvent) ile gönderir. Sunucu gelen veriyi **doğrular** (tahta 4x4 ve tüm değerler 2'nin kuvveti, skor 4M tavanlı, tema yalnızca Light/Dark) ve bellekte tutar; en iyi skoru sunucu hesaplar.
+- Oyuncu girince sunucu kaydı yükler; istemci `NM_GetData` (RemoteFunction) ile çeker. Kayıtta yarım kalmış geçerli bir tahta varsa oyun **kaldığı yerden** devam eder; yoksa temiz başlar (en iyi skor her durumda korunur).
+- İstemci her hamlede, restart'ta ve tema değişiminde durumunu `NM_Save` (RemoteEvent) ile gönderir. Sunucu gelen veriyi **doğrular** (tahta 4x4 ve tüm değerler 2'nin kuvveti, skor 4M tavanlı, tema yalnızca Light/Dark) ve bellekte tutar; en iyi skoru sunucu hesaplar.
 - DataStore yazımı: her **30 saniyede bir** (veri değiştiyse), **çıkışta** ve **sunucu kapanışında zorla** (`UpdateAsync` + 3 deneme; oyuncu başına yazımlar arası en az 6 sn).
 - İlk yükleme bitmeden istemci hiçbir kayıt göndermez (boş durumun eski kaydın üstüne yazma riski kapalı).
 
-Kayıt anahtarı: `Chroma2048Save_v1` / `u_<UserId>`. Kayıt yapısını bozacak bir değişiklik yaparsan `_v2` yap ki eski kayıtlar yanlış yüklenmesin.
+Kayıt anahtarı: `NeonMerge2048Save_v1` / `u_<UserId>`. Kayıt yapısını bozacak bir değişiklik yaparsan `_v2` yap ki eski kayıtlar yanlış yüklenmesin.
 
 Kaydedilen alanlar: `board` (4x4 tahta veya nil), `score`, `best`, `theme`.
 
@@ -54,7 +54,7 @@ Tema geçişleri TweenService ile 0.35 sn'de yumuşak yapılır.
 
 - **Tek dosya istemci**: UI (UICorner'lı board + hücreler + header + game-over katmanı), tema yöneticisi, oyun çekirdeği (4x4 matris, slide/merge/spawn), giriş (debounce'lu WASD + ok) ve animasyonlar (UIScale pop-in 0.8 → 1.05 → 1.0) tek LocalScript'te bölümlenmiş durumda.
 - **Sunucu yalnızca kayıt otoritesi**: oyun mantığı istemcide çalışır (tek kişilik puzzle, rekabetçi ekonomi yok); sunucu gelen veriyi şema ve tavan kontrolünden geçirir. Global leaderboard eklenecekse skor üretimi sunucuya taşınmalı.
-- İstemci ve sunucu betiği protokol üzerinden bağlıdır (`CH_GetData`, `CH_Save`); güncellerken **ikisini birlikte** değiştir.
+- İstemci ve sunucu betiği protokol üzerinden bağlıdır (`NM_GetData`, `NM_Save`); güncellerken **ikisini birlikte** değiştir.
 
 ## v2'de Yeni
 

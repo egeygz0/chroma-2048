@@ -1,9 +1,9 @@
 --[[
-	CHROMA 2048 — istemci (StarterPlayer > StarterPlayerScripts > LocalScript)
+	NEON MERGE 2048 — istemci (StarterPlayer > StarterPlayerScripts > LocalScript)
 
 	Mimari:
 	1. CONFIG      : tema tablolari, canli tile paleti, sabitler
-	2. REMOTES     : sunucu kayit protokolu (CH_GetData / CH_Save)
+	2. REMOTES     : sunucu kayit protokolu (NM_GetData / NM_Save)
 	3. UI BUILD    : ScreenGui + header + 4x4 board, tamamen programatik (UICorner her yerde)
 	4. THEME       : state-tabanli tema yoneticisi, TweenService ile yumusak gecis
 	5. CORE        : 4x4 matris, slide/merge/spawn, skor, game-over tespiti
@@ -89,8 +89,8 @@ end
 -- ========================================================================
 -- 2. REMOTES (Server.server.lua olusturur)
 -- ========================================================================
-local GetData   = ReplicatedStorage:WaitForChild("CH_GetData")   -- RemoteFunction
-local SaveEvent = ReplicatedStorage:WaitForChild("CH_Save")      -- RemoteEvent
+local GetData   = ReplicatedStorage:WaitForChild("NM_GetData")   -- RemoteFunction
+local SaveEvent = ReplicatedStorage:WaitForChild("NM_Save")      -- RemoteEvent
 
 -- ========================================================================
 -- 3. UI BUILD
@@ -107,7 +107,7 @@ local function corner(parent, radius)
 end
 
 local gui = make("ScreenGui", {
-	Name = "Chroma2048",
+	Name = "NeonMerge2048",
 	ResetOnSpawn = false,
 	IgnoreGuiInset = true,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
@@ -140,7 +140,7 @@ local title = make("TextLabel", {
 	Size = UDim2.new(0.38, 0, 1, 0),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBlack,
-	Text = "Chroma\n2048",
+	Text = "Neon Merge\n2048",
 	TextScaled = true,
 	TextXAlignment = Enum.TextXAlignment.Left,
 }, header)

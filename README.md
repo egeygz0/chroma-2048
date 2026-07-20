@@ -1,4 +1,4 @@
-# Chroma 2048
+# Neon Merge 2048
 
 Canlı renkli, light/dark temalı 2D 2048 Roblox oyunu (Luau). Tüm arayüz LocalScript tarafından runtime'da üretilir, Studio'da elle UI kurulumu gerekmez. Oyuncu verisi (skor, en iyi skor, yarım kalan tahta, tema tercihi) DataStore ile kalıcı kaydedilir: oyuncu çıkıp girince kaldığı yerden devam eder.
 
