@@ -315,7 +315,6 @@ end
 -- ========================================================================
 -- Leaderboard
 -- ========================================================================
--- keyFor burada tanimli cunku fetchTop da ana kayittan okuma yapiyor
 local function keyFor(userId)
 	return "u_" .. userId
 end
@@ -332,8 +331,9 @@ local function writeOrdered(orderedStore, userId, value)
 	end)
 end
 
--- Ilk 100 girisi ceker (kind: "score" | "tile"): ilk 10 icin isim + diger metrik,
--- tamami icin rank haritasi. TOP_CACHE_SECONDS'ta bir tazelenir.
+-- Ilk 100 girisi ceker (kind: "score" | "tile"): ilk 10 icin isim + o sekmenin
+-- metrigi, tamami icin rank haritasi. TOP_CACHE_SECONDS'ta bir tazelenir.
+-- Her sekme tek metrik gosterdigi icin ek kayit okumasi yapilmaz.
 local function fetchTop(kind)
 	local cache = topCaches[kind]
 	if os.clock() - cache.time < TOP_CACHE_SECONDS then
@@ -359,24 +359,9 @@ local function fetchTop(kind)
 						name = okN and n or "?"
 						nameCache[uid] = name
 					end
-					local score, tile
+					local score, tile = 0, 0
 					if kind == "tile" then tile = entry.value else score = entry.value end
-					-- Eksik metrik: once bu sunucudaki taze oturum, yoksa ana kayit
-					local onlinePlayer = Players:GetPlayerByUserId(uid)
-					local onlineSession = onlinePlayer and sessions[onlinePlayer]
-					if onlineSession and onlineSession.loaded then
-						score = score or onlineSession.data.best
-						tile = tile or onlineSession.data.bestTile
-					else
-						local okD, saved = pcall(function()
-							return store:GetAsync(keyFor(uid))
-						end)
-						if okD and type(saved) == "table" then
-							score = score or sanitizeNumber(saved.best, MAX_SCORE) or 0
-							tile = tile or sanitizeNumber(saved.bestTile, 1048576) or 0
-						end
-					end
-					table.insert(list, { name = name, score = score or 0, tile = tile or 0 })
+					table.insert(list, { name = name, score = score, tile = tile })
 				end
 			end
 		end

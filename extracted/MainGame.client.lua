@@ -688,11 +688,12 @@ local meBar = make("Frame", {
 }, shopModal)
 corner(meBar, TILE_RADIUS)
 
+-- Iki alan: sirandaki yer + aktif sekmenin metrigi (baslik sekmeye gore degisir)
 local meCaps, meVals = {}, {}
 local function meStat(caption, index)
 	local cap = make("TextLabel", {
-		Position = UDim2.new((index - 1) / 3, 0, 0, 6),
-		Size = UDim2.new(1 / 3, 0, 0, 12),
+		Position = UDim2.new((index - 1) / 2, 0, 0, 6),
+		Size = UDim2.new(0.5, 0, 0, 12),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
 		Text = caption,
@@ -700,8 +701,8 @@ local function meStat(caption, index)
 		ZIndex = 22,
 	}, meBar)
 	local val = make("TextLabel", {
-		Position = UDim2.new((index - 1) / 3, 0, 0, 20),
-		Size = UDim2.new(1 / 3, 0, 0, 22),
+		Position = UDim2.new((index - 1) / 2, 0, 0, 20),
+		Size = UDim2.new(0.5, 0, 0, 22),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBlack,
 		Text = "-",
@@ -710,11 +711,10 @@ local function meStat(caption, index)
 	}, meBar)
 	table.insert(meCaps, cap)
 	table.insert(meVals, val)
-	return val
+	return val, cap
 end
 local meRankVal = meStat("RANK", 1)
-local meBestVal = meStat("BEST", 2)
-local meTileVal = meStat("BLOCK", 3)
+local meMetricVal, meMetricCap = meStat("SCORE", 2)
 
 -- ========================================================================
 -- 5. THEME MANAGER
@@ -1174,10 +1174,9 @@ local function buildTopRows()
 		local t = THEMES[currentTheme]
 		local list = (res and res.ok and res.list) or {}
 
-		-- Kolonlar: aktif siralamanin metrigi ortada, digeri sagda
-		local primaryIsTile = (board == "tile")
-		local primaryText = primaryIsTile and "BLOCK" or "SCORE"
-		local secondaryText = primaryIsTile and "SCORE" or "BLOCK"
+		-- Tek metrik: SCORE sekmesinde yalnizca skor, BLOCK sekmesinde yalnizca en yuksek blok
+		local isTileBoard = (board == "tile")
+		local metricText = isTileBoard and "BLOCK" or "SCORE"
 
 		local head = make("Frame", {
 			Size = UDim2.new(1, -6, 0, 16),
@@ -1197,9 +1196,8 @@ local function buildTopRows()
 				ZIndex = 22,
 			}, head)
 		end
-		headLabel("PLAYER", UDim2.fromOffset(10, 0), UDim2.new(0.5, -10, 1, 0), Enum.TextXAlignment.Left)
-		headLabel(primaryText, UDim2.new(0.5, 0, 0, 0), UDim2.new(0.28, 0, 1, 0), Enum.TextXAlignment.Right)
-		headLabel(secondaryText, UDim2.new(0.78, 0, 0, 0), UDim2.new(0.22, -10, 1, 0), Enum.TextXAlignment.Right)
+		headLabel("PLAYER", UDim2.fromOffset(10, 0), UDim2.new(0.65, -10, 1, 0), Enum.TextXAlignment.Left)
+		headLabel(metricText, UDim2.new(0.65, 0, 0, 0), UDim2.new(0.35, -10, 1, 0), Enum.TextXAlignment.Right)
 
 		if #list == 0 then
 			local row, rowText = shopRow(40)
@@ -1207,7 +1205,7 @@ local function buildTopRows()
 				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
-				Text = "No scores yet",
+				Text = isTileBoard and "No blocks yet" or "No scores yet",
 				TextColor3 = rowText,
 				TextSize = 14,
 				ZIndex = 22,
@@ -1215,11 +1213,10 @@ local function buildTopRows()
 		else
 			for rank, entry in ipairs(list) do
 				local row, rowText = shopRow(38)
-				local primaryVal = primaryIsTile and entry.tile or entry.score
-				local secondaryVal = primaryIsTile and entry.score or entry.tile
+				local metricVal = isTileBoard and entry.tile or entry.score
 				make("TextLabel", {
 					Position = UDim2.fromOffset(10, 0),
-					Size = UDim2.new(0.5, -10, 1, 0),
+					Size = UDim2.new(0.65, -10, 1, 0),
 					BackgroundTransparency = 1,
 					Font = Enum.Font.GothamBold,
 					Text = rank .. ". " .. entry.name,
@@ -1230,22 +1227,11 @@ local function buildTopRows()
 					ZIndex = 22,
 				}, row)
 				make("TextLabel", {
-					Position = UDim2.new(0.5, 0, 0, 0),
-					Size = UDim2.new(0.28, 0, 1, 0),
+					Position = UDim2.new(0.65, 0, 0, 0),
+					Size = UDim2.new(0.35, -10, 1, 0),
 					BackgroundTransparency = 1,
 					Font = Enum.Font.GothamBlack,
-					Text = (primaryVal and primaryVal > 0) and tostring(primaryVal) or "-",
-					TextColor3 = rowText,
-					TextSize = 13,
-					TextXAlignment = Enum.TextXAlignment.Right,
-					ZIndex = 22,
-				}, row)
-				make("TextLabel", {
-					Position = UDim2.new(0.78, 0, 0, 0),
-					Size = UDim2.new(0.22, -10, 1, 0),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamBlack,
-					Text = (secondaryVal and secondaryVal > 0) and tostring(secondaryVal) or "-",
+					Text = (metricVal and metricVal > 0) and tostring(metricVal) or "-",
 					TextColor3 = rowText,
 					TextSize = 13,
 					TextXAlignment = Enum.TextXAlignment.Right,
@@ -1254,7 +1240,7 @@ local function buildTopRows()
 			end
 		end
 
-		-- Alt bar: kendi rank / best / block degerlerin
+		-- Alt bar: aktif sekmedeki sirandaki yer + o sekmenin metrigi
 		if res and res.ok and res.me then
 			local me = res.me
 			meBar.BackgroundColor3 = t.empty
@@ -1266,15 +1252,16 @@ local function buildTopRows()
 			for _, val in ipairs(meVals) do
 				val.TextColor3 = mc
 			end
+			local myMetric = isTileBoard and (me.tile or 0) or (me.best or 0)
 			if me.rank then
 				meRankVal.Text = "#" .. me.rank
-			elseif (me.best or 0) > 0 then
+			elseif myMetric > 0 then
 				meRankVal.Text = "100+"
 			else
 				meRankVal.Text = "-"
 			end
-			meBestVal.Text = tostring(me.best or 0)
-			meTileVal.Text = (me.tile and me.tile > 0) and tostring(me.tile) or "-"
+			meMetricCap.Text = metricText
+			meMetricVal.Text = (myMetric > 0) and tostring(myMetric) or "-"
 			meBar.Visible = true
 		end
 
