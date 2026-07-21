@@ -62,7 +62,7 @@ ROBUX sekmesinde tanımlı ürün yoksa (tüm ID'ler `0`) "No Robux items availa
 
 ## v4'te Yeni
 
-- **Günlük ödül:** günde bir kez alınır, art arda günlerde seri büyür (100 coin taban, gün başına +50, 7. günde tavan 400). Sunucu UTC gün numarasıyla doğrular, çift alım mümkün değil.
+- **Günlük ödül:** günde bir kez alınır, art arda günlerde seri büyür (50 coin taban, gün başına +25, 7. günde tavan 200). Sunucu UTC gün numarasıyla doğrular, çift alım mümkün değil.
 - **Kilometre taşları:** 2048'den sonra 4096, 8192... her yeni eşik bir kez kutlanır (önceden yalnızca 2048 vardı). Continue ile tur sürer.
 - **Kozmetik temalar:** Neon (1500 coin) ve Sunset (2500 coin) mağazadan açılır; tema butonu açık temalar arasında döner. Light/Dark herkeste açık.
 - **Veri sıfırlama:** SHOP'un altında çift onaylı `RESET ALL DATA`. Coin, best, upgrade ve tur sıfırlanır; oyuncu her iki leaderboard'dan da düşer.
@@ -110,7 +110,7 @@ ROBUX sekmesinde tanımlı ürün yoksa (tüm ID'ler `0`) "No Robux items availa
 | Head Start | 3 | 250/750/2250 | Her tur 8/16/32'lik hazır tile ile başlar |
 | Undo | 3 | 150/450/1350 | Tur başına +1 geri alma hakkı |
 | Coin Rush | 4 | 300/900/2700/8100 | Coin kazancı +%25/sv |
-| 5x5 Board | 1 | 5000 | 5x5 tahta kilidi; mağazadan 4x4/5x5 geçişi (geçiş yeni tur başlatır) |
+| Bigger Board | 2 | 5000 / 20000 | Sv1 5x5, Sv2 6x6 açar; mağazadan boyut seçilir (seçim yeni tur başlatır) |
 
 - **Undo:** UNDO butonu (hak varsa görünür), son hamleyi sunucudan geri alır (tek adım, spawn dahil).
 - **Mobil destek:** dokunmatik swipe ile oynanır (`TouchSwipe`).

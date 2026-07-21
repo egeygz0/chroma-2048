@@ -167,8 +167,8 @@ local SHOP = {
 	  name = "Undo", desc = "+1 undo per run per level" },
 	{ id = "coin",  max = 4, costs = { 300, 900, 2700, 8100 },
 	  name = "Coin Rush", desc = "+25% coins earned per level" },
-	{ id = "grid5", max = 1, costs = { 5000 },
-	  name = "5x5 Board", desc = "Unlock the big board (switch in shop)" },
+	{ id = "grid5", max = 2, costs = { 5000, 20000 },
+	  name = "Bigger Board", desc = "Lv1 unlocks 5x5, Lv2 unlocks 6x6 (switch in shop)" },
 	{ id = "themeNeon", max = 1, costs = { 1500 },
 	  name = "Neon Theme", desc = "Cosmetic: deep blue neon palette" },
 	{ id = "themeSunset", max = 1, costs = { 2500 },
@@ -236,6 +236,9 @@ local function tileBonus(maxTile)
 end
 
 -- vip: 2x Coins gamepass sahipligi (sunucudaki kopyayla birebir ayni olmali)
+-- Tahta boyutu: taban 4x4, grid5 seviyesi basina +1 (sunucuyla ayni)
+local BASE_BOARD_SIZE = 4
+
 local function coinsForRun(score, maxTile, coinLv, vip)
 	local base = math.floor(score / 200) + tileBonus(maxTile)
 	local total = math.floor(base * (1 + 0.25 * coinLv))
@@ -654,7 +657,10 @@ local function buildGrid(n)
 	for _, child in ipairs(gridFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
-	local pad = (n == 4) and 10 or 8
+	-- Tahta buyudukce bosluk ve yazi tavani kuculur (4x4 / 5x5 / 6x6)
+	local pad = (n <= 4) and 10 or ((n == 5) and 8 or 6)
+	local maxTextSize = (n <= 4) and 40 or ((n == 5) and 32 or 26)
+	local cellRadius = (n <= 4) and TILE_RADIUS or ((n == 5) and 10 or 8)
 	gridLayout.CellPadding = UDim2.fromOffset(pad, pad)
 	gridLayout.CellSize = UDim2.new(1 / n, -pad, 1 / n, -pad)
 	gridLayout.FillDirectionMaxCells = n
@@ -669,7 +675,7 @@ local function buildGrid(n)
 				BackgroundColor3 = emptyColor,
 				BorderSizePixel = 0,
 			}, gridFrame)
-			corner(cell, TILE_RADIUS)
+			corner(cell, cellRadius)
 
 			local tile = make("TextLabel", {
 				Name = "Tile",
@@ -681,8 +687,8 @@ local function buildGrid(n)
 				Visible = false,
 				ZIndex = 2,
 			}, cell)
-			corner(tile, TILE_RADIUS)
-			make("UITextSizeConstraint", { MaxTextSize = 40 }, tile)
+			corner(tile, cellRadius)
+			make("UITextSizeConstraint", { MaxTextSize = maxTextSize }, tile)
 			local scale = make("UIScale", { Scale = 1 }, tile)
 
 			cells[r][c] = { frame = cell, tile = tile, scale = scale }
@@ -1546,6 +1552,9 @@ local function playSlide(anims, done)
 	end
 	local layerPos = animLayer.AbsolutePosition
 	local ghosts = {}
+	-- Ghost'lar hucrelerle ayni koseyi ve yazi tavanini kullanir (4x4 / 5x5 / 6x6)
+	local ghostRadius = (S.size <= 4) and TILE_RADIUS or ((S.size == 5) and 10 or 8)
+	local ghostTextMax = (S.size <= 4) and 40 or ((S.size == 5) and 32 or 26)
 	for _, a in ipairs(anims) do
 		local fromCell = cells[a.fr][a.fc].frame
 		local toCell = cells[a.tr][a.tc].frame
@@ -1563,8 +1572,8 @@ local function playSlide(anims, done)
 			TextScaled = true,
 			ZIndex = 6,
 		}, animLayer)
-		corner(ghost, TILE_RADIUS)
-		make("UITextSizeConstraint", { MaxTextSize = 40 }, ghost)
+		corner(ghost, ghostRadius)
+		make("UITextSizeConstraint", { MaxTextSize = ghostTextMax }, ghost)
 		table.insert(ghosts, ghost)
 		if a.fr ~= a.tr or a.fc ~= a.tc then
 			TweenService:Create(ghost,
@@ -2158,41 +2167,47 @@ local function buildShopRows()
 		end
 	end
 
-	-- 5x5 kilidi acildiysa tahta boyutu satiri
-	if S.up.grid5 > 0 then
-		local row, rowText = shopRow(56)
+	-- Buyuk tahta kilidi acildiysa boyut secimi: acik her boyut icin bir dugme
+	local maxSize = BASE_BOARD_SIZE + S.up.grid5
+	if maxSize > BASE_BOARD_SIZE then
+		local row, rowText = shopRow(60)
 		make("TextLabel", {
-			Position = UDim2.fromOffset(10, 0),
-			Size = UDim2.new(1, -130, 1, 0),
+			Position = UDim2.fromOffset(10, 8),
+			Size = UDim2.new(1, -20, 0, 18),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Text = "Board Size (new run starts)",
+			Text = "Board Size (starts a new run)",
 			TextColor3 = rowText,
 			TextSize = 13,
-			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 22,
 		}, row)
-		local toggle = make("TextButton", {
-			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -10, 0.5, 0),
-			Size = UDim2.fromOffset(104, 34),
-			BackgroundColor3 = ACCENT,
-			Font = Enum.Font.GothamBold,
-			Text = (S.size == 4) and "Play 5x5" or "Play 4x4",
-			TextColor3 = WHITE_TEXT,
-			TextSize = 13,
-			AutoButtonColor = true,
-			BorderSizePixel = 0,
-			ZIndex = 22,
-		}, row)
-		corner(toggle, TILE_RADIUS)
-		toggle.Activated:Connect(function()
-			local target = (S.size == 4) and 5 or 4
-			S.shopOpen = false
-			shopModal.Visible = false
-			requestNewGame(target)
-		end)
+		local count = maxSize - BASE_BOARD_SIZE + 1
+		for i = 1, count do
+			local size = BASE_BOARD_SIZE + i - 1
+			local active = (S.size == size)
+			local button = make("TextButton", {
+				AnchorPoint = Vector2.new(0, 1),
+				Position = UDim2.new(0, 10 + (i - 1) * 78, 1, -8),
+				Size = UDim2.fromOffset(72, 28),
+				BackgroundColor3 = active and ACCENT or t.button,
+				Font = Enum.Font.GothamBold,
+				Text = size .. "x" .. size,
+				TextColor3 = active and WHITE_TEXT or t.buttonText,
+				TextSize = 13,
+				AutoButtonColor = not active,
+				BorderSizePixel = 0,
+				ZIndex = 22,
+			}, row)
+			corner(button, 14)
+			if not active then
+				button.Activated:Connect(function()
+					S.shopOpen = false
+					shopModal.Visible = false
+					requestNewGame(size)
+				end)
+			end
+		end
 	end
 
 	-- Veri sifirlama: cift onayli, geri alinamaz

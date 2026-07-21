@@ -86,12 +86,19 @@ local SHOP = {
 	{ id = "start", max = 3, costs = { 250, 750, 2250 } },           -- run basi hazir tile 8/16/32
 	{ id = "undo",  max = 3, costs = { 150, 450, 1350 } },           -- run basina geri alma hakki
 	{ id = "coin",  max = 4, costs = { 300, 900, 2700, 8100 } },     -- coin kazanci +%25/sv
-	{ id = "grid5", max = 1, costs = { 5000 } },                     -- 5x5 tahta kilidi
+	{ id = "grid5", max = 2, costs = { 5000, 20000 } },              -- sv1: 5x5, sv2: 6x6
 	{ id = "themeNeon",   max = 1, costs = { 1500 } },               -- kozmetik: Neon tema
 	{ id = "themeSunset", max = 1, costs = { 2500 } },               -- kozmetik: Sunset tema
 }
 local SHOP_BY_ID = {}
 for _, item in ipairs(SHOP) do SHOP_BY_ID[item.id] = item end
+
+-- Tahta boyutu: taban 4x4, grid5 seviyesi basina +1 (sv1 5x5, sv2 6x6)
+local BASE_BOARD_SIZE = 4
+
+local function maxBoardSize(data)
+	return BASE_BOARD_SIZE + (data.up.grid5 or 0)
+end
 
 -- Tema kilidi: Light/Dark herkeste acik, digerleri magazadan alinir
 local THEME_UNLOCK = { Neon = "themeNeon", Sunset = "themeSunset" }
@@ -103,8 +110,8 @@ local function themeAllowed(data, name)
 end
 
 -- Gunluk odul: gun numarasi (UTC), art arda gunlerde artan coin
-local DAILY_BASE = 100
-local DAILY_STEP = 50
+local DAILY_BASE = 50
+local DAILY_STEP = 25
 local DAILY_MAX_STREAK = 7
 
 local function dayNumber()
@@ -539,10 +546,12 @@ local function loadData(userId)
 						and result.theme or "Light"
 					local run = result.run
 					if type(run) == "table" then
-						local size = (run.size == 5) and 5 or 4
-						local board = sanitizeBoard(run.board, size)
+						-- Boyut kilit araliginin disindaysa tur dusurulur (yeni tur baslar)
+						local size = sanitizeNumber(run.size, 16) or 0
+						local board = (size >= BASE_BOARD_SIZE and size <= maxBoardSize(data))
+							and sanitizeBoard(run.board, size) or nil
 						local score = sanitizeNumber(run.score, MAX_SCORE)
-						if board and score and (size == 4 or data.up.grid5 > 0) then
+						if board and score then
 							data.bestTile = math.max(data.bestTile, boardMax(board, size))
 							data.run = {
 								board = board, score = score,
@@ -833,8 +842,8 @@ GetData.OnServerInvoke = function(playerObj)
 	end
 	local data = session.data
 	if not data.run or data.run.over then
-		local size = (data.run and data.run.size) or 4
-		if size == 5 and data.up.grid5 < 1 then size = 4 end
+		local size = (data.run and data.run.size) or BASE_BOARD_SIZE
+		size = math.clamp(size, BASE_BOARD_SIZE, maxBoardSize(data))
 		data.run = startRun(data, size)
 		session.dirty = true
 	end
@@ -947,12 +956,16 @@ Act.OnServerInvoke = function(playerObj, req)
 	local a = req.a
 
 	if a == "new" or a == "grid" then
-		local size = (data.run and data.run.size) or 4
+		local size = (data.run and data.run.size) or BASE_BOARD_SIZE
 		if a == "grid" then
-			size = (req.size == 5) and 5 or 4
-			if size == 5 and data.up.grid5 < 1 then
+			local requested = sanitizeNumber(req.size, 16)
+			if not requested or requested < BASE_BOARD_SIZE or requested > maxBoardSize(data) then
 				return { ok = false, err = "locked" }
 			end
+			size = requested
+		else
+			-- Kilit kaybolmus olabilir (wipe): mevcut boyutu izinli araliga cek
+			size = math.clamp(size, BASE_BOARD_SIZE, maxBoardSize(data))
 		end
 		local earned = 0
 		if data.run and not data.run.over and data.run.score > 0 then
@@ -1039,7 +1052,7 @@ Act.OnServerInvoke = function(playerObj, req)
 		newData.sfx = data.sfx
 		newData.muted = data.muted
 		session.data = newData
-		newData.run = startRun(newData, 4)
+		newData.run = startRun(newData, BASE_BOARD_SIZE)
 		session.dirty = true
 		session.topWritten = 0
 		session.tileWritten = 0
