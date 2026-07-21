@@ -90,6 +90,7 @@ local THEMES = {
 		statLabel  = hex("8A8A8A"),
 		stroke     = hex("D0D0D0"),
 		strokeT    = 0.2,
+		tileTint   = nil,   -- referans palet, tonlama yok
 	},
 	Dark = {
 		screen     = hex("121212"),
@@ -102,6 +103,7 @@ local THEMES = {
 		statLabel  = hex("9A968F"),
 		stroke     = hex("3A3A40"),
 		strokeT    = 0.2,
+		tileTint   = { color = hex("000000"), amount = 0.08 },   -- siyah zeminde parlamasin
 	},
 	-- Kozmetik temalar (magazadan acilir)
 	Neon = {
@@ -115,6 +117,7 @@ local THEMES = {
 		statLabel  = hex("8888BB"),
 		stroke     = hex("00E5FF"),
 		strokeT    = 0.45,
+		tileTint   = { color = hex("00E5FF"), amount = 0.14 },   -- elektrik mavisine kayar
 	},
 	Sunset = {
 		screen     = hex("2B1B2E"),
@@ -127,6 +130,7 @@ local THEMES = {
 		statLabel  = hex("C89B8C"),
 		stroke     = hex("FF8C42"),
 		strokeT    = 0.35,
+		tileTint   = { color = hex("FF8C42"), amount = 0.2 },    -- gun batimi sicakligina kayar
 	},
 }
 
@@ -428,6 +432,15 @@ local S = {
 	up = { spawn = 0, start = 0, undo = 0, coin = 0, grid5 = 0, themeNeon = 0, themeSunset = 0 },
 }
 local currentTheme = "Light"
+
+-- Tile rengi tema tonlamasindan gecer. Deger -> renk eslemesi KORUNUR
+-- (oyuncu tahtayi renkten hizli okur), yalnizca tum palete ayni ton katilir.
+local function tileColor(v)
+	local base = TILE_COLORS[math.min(v, 2048)] or TILE_COLORS[2048]
+	local tint = THEMES[currentTheme].tileTint
+	if tint then base = base:Lerp(tint.color, tint.amount) end
+	return base
+end
 
 -- ========================================================================
 -- 4. UI BUILD
@@ -1406,7 +1419,13 @@ local function applyTheme(name)
 	end
 	for r = 1, S.size do
 		for c = 1, S.size do
-			tween(cells[r][c].frame, { BackgroundColor3 = t.empty })
+			local cell = cells[r][c]
+			tween(cell.frame, { BackgroundColor3 = t.empty })
+			-- Tile'lar da tema tonlamasini alir; deger-renk eslemesi degismez
+			if S.board and S.board[r] and (S.board[r][c] or 0) > 0 then
+				local color = tileColor(S.board[r][c])
+				tween(cell.tile, { BackgroundColor3 = color, TextColor3 = textColorFor(color) })
+			end
 		end
 	end
 	themeButton.Text = THEME_ICON[name] or "☀️"
@@ -1683,7 +1702,7 @@ local function render(popSet)
 			if v == 0 then
 				cell.tile.Visible = false
 			else
-				local color = TILE_COLORS[math.min(v, 2048)] or TILE_COLORS[2048]
+				local color = tileColor(v)
 				cell.tile.Visible = true
 				cell.tile.Text = tostring(v)
 				cell.tile.BackgroundColor3 = color
@@ -1713,7 +1732,7 @@ local function playSlide(anims, done)
 	for _, a in ipairs(anims) do
 		local fromCell = cells[a.fr][a.fc].frame
 		local toCell = cells[a.tr][a.tc].frame
-		local color = TILE_COLORS[math.min(a.v, 2048)] or TILE_COLORS[2048]
+		local color = tileColor(a.v)
 		local ghost = make("TextLabel", {
 			Position = UDim2.fromOffset(
 				fromCell.AbsolutePosition.X - layerPos.X,
@@ -2290,51 +2309,11 @@ end
 local function buildShopRows()
 	local t = THEMES[currentTheme]
 
-	-- Boyut secimi en ustte: kilit acilinca kaydirmadan gorunur olmali
-	local maxSize = BASE_BOARD_SIZE + S.up.grid5
-	if maxSize > BASE_BOARD_SIZE then
-		local row, rowText = shopRow(60)
-		make("TextLabel", {
-			Position = UDim2.fromOffset(10, 8),
-			Size = UDim2.new(1, -20, 0, 18),
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBold,
-			Text = "Board Size (starts a new run)",
-			TextColor3 = rowText,
-			TextSize = 13,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			ZIndex = 22,
-		}, row)
-		for i = 1, maxSize - BASE_BOARD_SIZE + 1 do
-			local size = BASE_BOARD_SIZE + i - 1
-			local active = (S.size == size)
-			local button = make("TextButton", {
-				AnchorPoint = Vector2.new(0, 1),
-				Position = UDim2.new(0, 10 + (i - 1) * 78, 1, -8),
-				Size = UDim2.fromOffset(72, 28),
-				BackgroundColor3 = active and ACCENT or t.button,
-				Font = Enum.Font.GothamBold,
-				Text = size .. "x" .. size,
-				TextColor3 = active and WHITE_TEXT or t.buttonText,
-				TextSize = 13,
-				AutoButtonColor = not active,
-				BorderSizePixel = 0,
-				ZIndex = 22,
-			}, row)
-			corner(button, 14)
-			if not active then
-				button.Activated:Connect(function()
-					S.shopOpen = false
-					shopModal.Visible = false
-					requestNewGame(size)
-				end)
-			end
-		end
-	end
-
 	for _, item in ipairs(SHOP) do
 		local lv = S.up[item.id]
-		local row, rowText = shopRow(64)
+		-- Tahta kalemi kilit acikken buyur: aciklamanin altinda boyut secimi tasir
+		local showSizes = (item.id == "grid5") and lv > 0
+		local row, rowText = shopRow(showSizes and 112 or 64)
 		make("TextLabel", {
 			Position = UDim2.fromOffset(10, 8),
 			Size = UDim2.new(1, -130, 0, 18),
@@ -2362,9 +2341,51 @@ local function buildShopRows()
 			ZIndex = 22,
 		}, row)
 
+		-- Boyut secimi: kilit acildiysa aciklamanin altinda
+		if showSizes then
+			make("TextLabel", {
+				Position = UDim2.fromOffset(10, 58),
+				Size = UDim2.new(1, -20, 0, 14),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = "BOARD SIZE (STARTS A NEW RUN)",
+				TextColor3 = rowText,
+				TextTransparency = 0.4,
+				TextSize = 10,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 22,
+			}, row)
+			for i = 1, lv + 1 do
+				local size = BASE_BOARD_SIZE + i - 1
+				local active = (S.size == size)
+				local sizeButton = make("TextButton", {
+					AnchorPoint = Vector2.new(0, 1),
+					Position = UDim2.new(0, 10 + (i - 1) * 78, 1, -10),
+					Size = UDim2.fromOffset(72, 28),
+					BackgroundColor3 = active and ACCENT or t.button,
+					Font = Enum.Font.GothamBold,
+					Text = size .. "x" .. size,
+					TextColor3 = active and WHITE_TEXT or t.buttonText,
+					TextSize = 13,
+					AutoButtonColor = not active,
+					BorderSizePixel = 0,
+					ZIndex = 22,
+				}, row)
+				corner(sizeButton, 14)
+				if not active then
+					sizeButton.Activated:Connect(function()
+						S.shopOpen = false
+						shopModal.Visible = false
+						requestNewGame(size)
+					end)
+				end
+			end
+		end
+
 		local buyButton = make("TextButton", {
-			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -10, 0.5, 0),
+			-- Uzun satirda ustte durur, boyut dugmelerinin uzerine binmesin
+			AnchorPoint = Vector2.new(1, showSizes and 0 or 0.5),
+			Position = showSizes and UDim2.new(1, -10, 0, 12) or UDim2.new(1, -10, 0.5, 0),
 			Size = UDim2.fromOffset(104, 36),
 			Font = Enum.Font.GothamBold,
 			TextSize = 14,
@@ -2423,14 +2444,8 @@ local function buildShopRows()
 					end
 					playSound("buy")
 					updateHUD()
-					-- Tahta yukseltmesi aninda uygulanir: yeni boyutta tur baslar.
-					-- Mevcut tur coin'e cevrildigi icin kayip olmaz.
-					if item.id == "grid5" then
-						S.shopOpen = false
-						shopModal.Visible = false
-						requestNewGame(BASE_BOARD_SIZE + S.up.grid5)
-						return
-					end
+					-- Tahta yukseltmesinde satir buyur ve boyut dugmeleri belirir;
+					-- gecis oyuncunun secimine birakilir (tur ortasinda zorla bitmesin)
 					rebuildShop()
 				end
 			end)
