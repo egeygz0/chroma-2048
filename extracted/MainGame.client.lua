@@ -251,12 +251,14 @@ end
 
 -- Her tetiklemede sablonun kopyasi calinir. Tek Sound'u tekrar tekrar Play()
 -- etmek arka arkaya hamlelerde sesi bastan baslatip duyulmaz hale getiriyordu.
-local function playSound(name)
+-- scale: bu tetikleme icin siddet carpani (1 = tam). Ust uste binen seslerde
+-- ikincil olani kismak icin kullanilir.
+local function playSound(name, scale)
 	if soundMuted or soundVolume <= 0 or soundOff[name] then return end
 	local template = sounds[name]
 	if not template or not soundFolder then return end
 	local s = template:Clone()
-	s.Volume = effectiveVolume()
+	s.Volume = effectiveVolume() * (scale or 1)
 	s.Parent = soundFolder
 	s:Play()
 	s.Ended:Once(function() s:Destroy() end)
@@ -1897,9 +1899,14 @@ local function doMove(dir)
 	S.spawns += 1
 	if sr then popSet[sr .. "_" .. sc] = true end
 	queueMove(dir)
-	-- Kaydirma sesi her gecerli hamlede calar; birlestirme varsa uzerine merge eklenir
-	playSound("move")
-	if gained > 0 then playSound("merge") end
+	-- Kaydirma sesi her gecerli hamlede calar (girdi onayi). Birlestirme varsa
+	-- merge sesi one cikar, slide kisilir; ikisi esit seviyede binince camurlasiyor.
+	if gained > 0 then
+		playSound("move", 0.45)
+		playSound("merge")
+	else
+		playSound("move")
+	end
 
 	-- 512+ birlestirmede tahta sarsilir (anims'te merged girisleri birlesme oncesi degeri tutar)
 	local maxMerge = 0
