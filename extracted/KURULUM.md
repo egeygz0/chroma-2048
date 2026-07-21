@@ -4,7 +4,8 @@
 
 Sağ altta ⚙ butonu; tıklayınca tam ekran ayarlar paneli açılır.
 
-- **Tek noktadan ses kontrolü:** master seviye kaydırıcısı (0-100%) + MUTE düğmesi. Ses başına ayrı anahtar yerine bu yöntem tercih edildi (standart oyun UX'i); tüm efektleri birlikte yönetir.
+- **Ses kontrolü:** master seviye kaydırıcısı (0-100%) + MUTE ALL düğmesi, ayrıca **her ses için ayrı ON/OFF anahtarı** (Slide, Merge, Celebration, Shop purchase, Game over, Daily bonus). Kapatılan ses hiç çalmaz; MUTE ALL açıkken anahtarlar soluk görünür (etkisiz oldukları belli olsun).
+- **Veri sıfırlama** artık burada (mağazadan taşındı): çift onaylı `RESET ALL DATA`.
 - Tercih **sunucuda kalıcı** saklanır (`sfx`, `muted`), oturumlar arası taşınır ve veri sıfırlamada korunur (ses ayarı ilerleme değildir).
 - Kaydırıcı bırakılınca tek istek gönderilir, sürüklerken istek seli olmaz.
 - Panel açıkken hamleler kilitlidir ve panel altındaki butonlara tıklama sızmaz.
@@ -46,7 +47,7 @@ Dosyanın başındaki `SOUND_IDS` tablosuna ID'leri yapıştır, `0` bırakılan
 
 | Sekme | İçerik |
 |---|---|
-| COIN | Coin ile alınan yükseltmeler, 4x4/5x5 geçişi, `RESET ALL DATA` |
+| COIN | Coin ile alınan yükseltmeler ve tahta boyutu seçimi |
 | ROBUX | Coin paketleri, VIP 2x Coins pass'i (sahipse "OWNED"), Robux ile açılan temalar |
 
 ROBUX sekmesinde tanımlı ürün yoksa (tüm ID'ler `0`) "No Robux items available yet" yazar.

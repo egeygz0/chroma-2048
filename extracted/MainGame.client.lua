@@ -188,10 +188,22 @@ local SOUND_IDS = {
 }
 local SOUND_VOLUME = 0.5   -- %100 seviyedeki tavan ses siddeti
 
+-- Ayarlar panelindeki sira ve gorunen adlar (sunucudaki SOUND_KEYS ile ayni kume)
+local SOUND_ORDER = { "move", "merge", "milestone", "buy", "gameOver", "daily" }
+local SOUND_LABELS = {
+	move      = "Slide",
+	merge     = "Merge",
+	milestone = "Celebration",
+	buy       = "Shop purchase",
+	gameOver  = "Game over",
+	daily     = "Daily bonus",
+}
+
 -- Ses tercihi tek noktadan yonetilir: master seviye + sessize alma.
 -- Ses basina ayri anahtar yerine bu yontem tercih edildi (standart oyun UX'i).
 local soundVolume = 70      -- 0-100, sunucudan yuklenir
 local soundMuted = false
+local soundOff = {}         -- kapatilmis ses anahtarlari (ayarlardan)
 local sounds = {}
 
 local function effectiveVolume()
@@ -221,7 +233,7 @@ local function initSounds(parent)
 end
 
 local function playSound(name)
-	if soundMuted or soundVolume <= 0 then return end
+	if soundMuted or soundVolume <= 0 or soundOff[name] then return end
 	local s = sounds[name]
 	if s then s:Play() end
 end
@@ -1063,10 +1075,11 @@ local meRankVal = meStat("RANK", 1)
 local meMetricVal, meMetricCap = meStat("SCORE", 2)
 
 -- ========================================================================
--- AYARLAR: sag alt disk butonu + ses paneli (master seviye + sessize alma).
--- Tum widget'lar tek tabloda: Luau'nun 200 top-level local sinirini zorlamamak icin.
+-- AYARLAR: sag alt disk butonu + panel (master seviye, ses basina anahtar,
+-- veri sifirlama). Tum widget'lar tek tabloda: Luau'nun 200 top-level local
+-- sinirini zorlamamak icin.
 -- ========================================================================
-local SET = {}
+local SET = { toggles = {} }
 
 SET.button = make("TextButton", {
 	Name = "SettingsButton",
@@ -1099,14 +1112,14 @@ SET.panel = make("Frame", {
 	Name = "Panel",
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.new(0.9, 0, 0, 210),
+	Size = UDim2.new(0.92, 0, 0.86, 0),
 	Active = true,
 	BorderSizePixel = 0,
 	ZIndex = 61,
 }, SET.modal)
 corner(SET.panel, BOARD_RADIUS)
 stroke(SET.panel)
-make("UISizeConstraint", { MaxSize = Vector2.new(420, 210) }, SET.panel)
+make("UISizeConstraint", { MaxSize = Vector2.new(420, 520) }, SET.panel)
 make("UIPadding", {
 	PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
 	PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
@@ -1134,20 +1147,44 @@ SET.close = make("TextButton", {
 }, SET.panel)
 corner(SET.close, TILE_RADIUS)
 
-SET.row = make("Frame", {
+-- Icerik listesi: panel kucuk ekranda tasmasin diye kaydirilabilir
+SET.list = make("ScrollingFrame", {
+	Name = "List",
 	Position = UDim2.new(0, 0, 0, 40),
-	Size = UDim2.new(1, 0, 0, 134),
+	Size = UDim2.new(1, 0, 1, -40),
+	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
+	ScrollBarThickness = 4,
+	CanvasSize = UDim2.new(0, 0, 0, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ZIndex = 62,
 }, SET.panel)
-corner(SET.row, TILE_RADIUS)
+make("UIListLayout", {
+	Padding = UDim.new(0, 8),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, SET.list)
+
+-- Ayar satiri olusturucu (magazadaki shopRow'un ayarlar karsiligi)
+local function setRow(height, order)
+	local row = make("Frame", {
+		Size = UDim2.new(1, -6, 0, height),
+		LayoutOrder = order,
+		BorderSizePixel = 0,
+		ZIndex = 62,
+	}, SET.list)
+	corner(row, TILE_RADIUS)
+	return row
+end
+
+-- 1) Master seviye + sessize alma
+SET.row = setRow(134, 1)
 
 SET.label = make("TextLabel", {
 	Position = UDim2.fromOffset(14, 12),
 	Size = UDim2.new(1, -100, 0, 20),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBold,
-	Text = "SOUND EFFECTS",
+	Text = "MASTER VOLUME",
 	TextSize = 13,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	ZIndex = 63,
@@ -1209,7 +1246,7 @@ SET.mute = make("TextButton", {
 	Position = UDim2.new(0, 14, 1, -12),
 	Size = UDim2.fromOffset(112, 34),
 	Font = Enum.Font.GothamBold,
-	Text = "MUTE",
+	Text = "MUTE ALL",
 	TextSize = 13,
 	AutoButtonColor = true,
 	BorderSizePixel = 0,
@@ -1229,11 +1266,70 @@ SET.hint = make("TextLabel", {
 	ZIndex = 63,
 }, SET.row)
 
+-- 2) Ses basina ac/kapa anahtarlari
+SET.soundsHeader = make("TextLabel", {
+	Size = UDim2.new(1, -6, 0, 18),
+	LayoutOrder = 2,
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "  INDIVIDUAL SOUNDS",
+	TextSize = 10,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 62,
+}, SET.list)
+
+SET.soundLabels = {}
+for i, key in ipairs(SOUND_ORDER) do
+	local row = setRow(44, 2 + i)
+	SET.soundLabels[key] = make("TextLabel", {
+		Position = UDim2.fromOffset(14, 0),
+		Size = UDim2.new(1, -104, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = SOUND_LABELS[key],
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 63,
+	}, row)
+	local toggle = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -14, 0.5, 0),
+		Size = UDim2.fromOffset(72, 30),
+		Font = Enum.Font.GothamBold,
+		Text = "ON",
+		TextSize = 13,
+		AutoButtonColor = true,
+		BorderSizePixel = 0,
+		ZIndex = 63,
+	}, row)
+	corner(toggle, 15)
+	SET.toggles[key] = toggle
+end
+
+-- 3) Veri sifirlama (magazadan buraya tasindi)
+SET.resetRow = setRow(58, 20)
+SET.reset = make("TextButton", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.new(1, -28, 0, 36),
+	BackgroundColor3 = hex("5C3448"),
+	Font = Enum.Font.GothamBold,
+	Text = "RESET ALL DATA",
+	TextColor3 = hex("FFB3B3"),
+	TextSize = 13,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 63,
+}, SET.resetRow)
+corner(SET.reset, TILE_RADIUS)
+
 -- ========================================================================
 -- 5. THEME MANAGER
 -- ========================================================================
--- Ileri bildirim: magaza icerigi tema degisiminde ve satin alma/sync olaylarinda yenilenir
+-- Ileri bildirimler: tema degisiminde magaza ve ayar paneli yeniden boyanir
 local rebuildShop
+local refreshSoundUI
 
 local function tween(inst, props)
 	TweenService:Create(inst, THEME_TWEEN, props):Play()
@@ -1253,11 +1349,19 @@ local function applyTheme(name)
 	tween(SET.panel, { BackgroundColor3 = t.board })
 	tween(SET.title, { TextColor3 = t.text })
 	tween(SET.row, { BackgroundColor3 = t.empty })
+	tween(SET.resetRow, { BackgroundColor3 = t.empty })
 	tween(SET.track, { BackgroundColor3 = t.button })
+	tween(SET.soundsHeader, { TextColor3 = t.statLabel })
 	local rowText = textColorFor(t.empty)
 	tween(SET.label, { TextColor3 = rowText })
 	tween(SET.percent, { TextColor3 = rowText })
 	tween(SET.hint, { TextColor3 = rowText, TextTransparency = 0.35 })
+	for _, key in ipairs(SOUND_ORDER) do
+		tween(SET.soundLabels[key], { TextColor3 = rowText })
+		SET.toggles[key].Parent.BackgroundColor3 = t.empty
+	end
+	-- Anahtar butonlarinin renkleri durum bagimli: paneldeyken yeniden hesapla
+	if refreshSoundUI and SET.modal.Visible then refreshSoundUI() end
 	-- Alt sekmelerin pasif olani tema rengini alir; aktif olan rebuildShop'ta mavi boyanir
 	if shopModal.Visible then rebuildShop() end
 	tween(modalTitle, { TextColor3 = t.text })
@@ -1325,7 +1429,8 @@ end)
 local settingsOpen = false
 local dragInput = nil   -- suruklemeyi baslatan InputObject (coklu dokunmayi ayirt eder)
 
-local function refreshSoundUI()
+refreshSoundUI = function()
+	local t = THEMES[currentTheme]
 	local ratio = soundVolume / 100
 	SET.fill.Size = UDim2.fromScale(ratio, 1)
 	SET.knob.Position = UDim2.fromScale(ratio, 0.5)
@@ -1338,10 +1443,19 @@ local function refreshSoundUI()
 		SET.mute.BackgroundColor3 = hex("D32F2F")
 		SET.mute.TextColor3 = WHITE_TEXT
 	else
-		local t = THEMES[currentTheme]
-		SET.mute.Text = "MUTE"
+		SET.mute.Text = "MUTE ALL"
 		SET.mute.BackgroundColor3 = t.button
 		SET.mute.TextColor3 = t.buttonText
+	end
+	-- Ses basina anahtarlar: acikken yesil, kapaliyken tema rengi.
+	-- Master mute aciksa hepsi soluk gorunur (etkisiz oldugu belli olsun).
+	for _, key in ipairs(SOUND_ORDER) do
+		local button = SET.toggles[key]
+		local on = not soundOff[key]
+		button.Text = on and "ON" or "OFF"
+		button.BackgroundColor3 = on and hex("00C853") or t.button
+		button.TextColor3 = on and WHITE_TEXT or t.statLabel
+		button.BackgroundTransparency = soundMuted and 0.5 or 0
 	end
 end
 
@@ -1349,7 +1463,7 @@ end
 local function pushSoundSetting()
 	task.spawn(function()
 		for _ = 1, 3 do
-			local res = act({ a = "sfx", vol = soundVolume, muted = soundMuted })
+			local res = act({ a = "sfx", vol = soundVolume, muted = soundMuted, off = soundOff })
 			if not (res and res.err == "too_fast") then return end
 			task.wait(0.2)
 		end
@@ -1400,6 +1514,16 @@ SET.mute.Activated:Connect(function()
 	refreshSoundUI()
 	pushSoundSetting()
 end)
+
+-- Ses basina ac/kapa: kapali ses hic calmaz, seviye ayarindan bagimsizdir
+for _, key in ipairs(SOUND_ORDER) do
+	SET.toggles[key].Activated:Connect(function()
+		if not S.loaded then return end
+		soundOff[key] = (not soundOff[key]) or nil
+		refreshSoundUI()
+		pushSoundSetting()
+	end)
+end
 
 local function setSettingsOpen(open)
 	settingsOpen = open
@@ -1679,6 +1803,12 @@ local function applyState(state, earned)
 		soundVolume = math.clamp(math.floor(state.sfx), 0, 100)
 	end
 	if state.muted ~= nil then soundMuted = state.muted == true end
+	if type(state.sfxOff) == "table" then
+		soundOff = {}
+		for _, key in ipairs(SOUND_ORDER) do
+			if state.sfxOff[key] == true then soundOff[key] = true end
+		end
+	end
 	applySoundVolume()
 	refreshSoundUI()
 	if state.theme and state.theme ~= currentTheme then
@@ -1795,6 +1925,40 @@ newButton.Activated:Connect(function()
 end)
 
 undoButton.Activated:Connect(requestUndo)
+
+-- Veri sifirlama (ayarlar panelinde): cift onayli, geri alinamaz.
+-- Baglanti burada cunku flushMoves/act/applyState bu noktadan sonra tanimli.
+do
+	local armed = false
+	local function disarm()
+		armed = false
+		SET.reset.Text = "RESET ALL DATA"
+		SET.reset.BackgroundColor3 = hex("5C3448")
+		SET.reset.TextColor3 = hex("FFB3B3")
+	end
+
+	SET.reset.Activated:Connect(function()
+		if not S.loaded then return end
+		if not armed then
+			armed = true
+			SET.reset.Text = "TAP AGAIN TO CONFIRM"
+			SET.reset.BackgroundColor3 = hex("D32F2F")
+			SET.reset.TextColor3 = WHITE_TEXT
+			task.delay(4, function()
+				if armed then disarm() end
+			end)
+			return
+		end
+		disarm()
+		flushMoves()
+		local res = act({ a = "wipe" })
+		if res and res.ok then
+			applyTheme("Light")
+			applyState(res.state)
+			setSettingsOpen(false)
+		end
+	end)
+end
 
 -- Gunluk odul: yukleme bitince hak varsa gosterilir, Claim sunucuda dogrulanir
 local function showDaily()
@@ -2210,51 +2374,6 @@ local function buildShopRows()
 		end
 	end
 
-	-- Veri sifirlama: cift onayli, geri alinamaz
-	local resetRow = shopRow(56)
-	local resetButton = make("TextButton", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.new(1, -20, 0, 36),
-		BackgroundColor3 = hex("5C3448"),
-		Font = Enum.Font.GothamBold,
-		Text = "RESET ALL DATA",
-		TextColor3 = hex("FFB3B3"),
-		TextSize = 13,
-		AutoButtonColor = true,
-		BorderSizePixel = 0,
-		ZIndex = 22,
-	}, resetRow)
-	corner(resetButton, TILE_RADIUS)
-
-	local resetArmed = false
-	resetButton.Activated:Connect(function()
-		if not S.loaded then return end
-		if not resetArmed then
-			resetArmed = true
-			resetButton.Text = "TAP AGAIN TO CONFIRM"
-			resetButton.BackgroundColor3 = hex("D32F2F")
-			resetButton.TextColor3 = WHITE_TEXT
-			task.delay(4, function()
-				if resetArmed and resetButton.Parent then
-					resetArmed = false
-					resetButton.Text = "RESET ALL DATA"
-					resetButton.BackgroundColor3 = hex("5C3448")
-					resetButton.TextColor3 = hex("FFB3B3")
-				end
-			end)
-			return
-		end
-		resetArmed = false
-		flushMoves()
-		local res = act({ a = "wipe" })
-		if res and res.ok then
-			applyTheme("Light")
-			applyState(res.state)
-			S.shopOpen = false
-			shopModal.Visible = false
-		end
-	end)
 end
 
 local function buildTopRows()

@@ -324,8 +324,22 @@ local function defaultData()
 		paid = {},       -- Robux ile alinmis kalici kilitler (wipe sonrasi geri verilir)
 		sfx = 70,        -- ses seviyesi yuzdesi (0-100)
 		muted = false,   -- sessize alma (seviye korunur)
+		sfxOff = {},     -- kapatilmis ses anahtarlari kumesi
 		run = nil,
 	}
+end
+
+-- Istemcideki SOUND_IDS anahtarlariyla ayni tutulmali
+local SOUND_KEYS = { "move", "merge", "buy", "gameOver", "milestone", "daily" }
+
+local function sanitizeSfxOff(t)
+	local out = {}
+	if type(t) == "table" then
+		for _, key in ipairs(SOUND_KEYS) do
+			if t[key] == true then out[key] = true end
+		end
+	end
+	return out
 end
 
 local function sanitizePaid(p)
@@ -420,6 +434,7 @@ local function publicState(data)
 		vip = data.vip == true,   -- 2x Coins gamepass (oturumdan kopyalanir)
 		sfx = data.sfx,
 		muted = data.muted,
+		sfxOff = deepCopy(data.sfxOff),
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
@@ -542,6 +557,7 @@ local function loadData(userId)
 					data.paid     = sanitizePaid(result.paid)
 					data.sfx      = math.clamp(sanitizeNumber(result.sfx, 100) or 70, 0, 100)
 					data.muted    = result.muted == true
+					data.sfxOff   = sanitizeSfxOff(result.sfxOff)
 					data.theme = (type(result.theme) == "string" and themeAllowed(data, result.theme))
 						and result.theme or "Light"
 					local run = result.run
@@ -611,6 +627,7 @@ local function serializeData(data)
 		paid = deepCopy(data.paid),
 		sfx = data.sfx,
 		muted = data.muted,
+		sfxOff = deepCopy(data.sfxOff),
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
@@ -1021,6 +1038,9 @@ Act.OnServerInvoke = function(playerObj, req)
 		if type(req.muted) == "boolean" then
 			data.muted = req.muted
 		end
+		if type(req.off) == "table" then
+			data.sfxOff = sanitizeSfxOff(req.off)
+		end
 		session.dirty = true
 		return { ok = true }
 
@@ -1051,6 +1071,7 @@ Act.OnServerInvoke = function(playerObj, req)
 		-- Ses tercihi ilerleme degil, sifirlamada korunur
 		newData.sfx = data.sfx
 		newData.muted = data.muted
+		newData.sfxOff = deepCopy(data.sfxOff)
 		session.data = newData
 		newData.run = startRun(newData, BASE_BOARD_SIZE)
 		session.dirty = true
