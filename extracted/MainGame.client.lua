@@ -1431,6 +1431,19 @@ local function unlockedThemes()
 	return list
 end
 
+-- Temayi uygula + sunucuya kaydet. Hiz sinirina takilirsa tekrar dener,
+-- yoksa sunucu eski temayi kaydeder ve tekrar giriste secim geri doner.
+local function setTheme(name)
+	applyTheme(name)
+	task.spawn(function()
+		for _ = 1, 3 do
+			local res = act({ a = "theme", t = name })
+			if not (res and res.err == "too_fast") then return end
+			task.wait(0.2)
+		end
+	end)
+end
+
 themeButton.Activated:Connect(function()
 	if not S.loaded then return end   -- yukleme bitmeden secim sunucuda kaydedilemez
 	local list = unlockedThemes()
@@ -1438,16 +1451,7 @@ themeButton.Activated:Connect(function()
 	for i, name in ipairs(list) do
 		if name == currentTheme then index = i break end
 	end
-	local nextTheme = list[(index % #list) + 1]
-	applyTheme(nextTheme)
-	-- Hiz sinirina takilirsa tekrar dene, yoksa sunucu eski temayi kaydeder
-	task.spawn(function()
-		for _ = 1, 3 do
-			local res = act({ a = "theme", t = nextTheme })
-			if not (res and res.err == "too_fast") then return end
-			task.wait(0.2)
-		end
-	end)
+	setTheme(list[(index % #list) + 1])
 end)
 
 -- ========================================================================
@@ -2091,13 +2095,20 @@ local function shopRow(height)
 	return row, textColorFor(t.empty)
 end
 
--- Robux ile alinabilen urunler (ID 0 ise satirlari hic olusturulmaz)
+-- Robux ile alinabilen urunler (ID 0 ise satirlari hic olusturulmaz).
+-- robux alanlari yalnizca gosterim icindir; Roblox panelindeki fiyatla ayni tutulmali.
 local COIN_BUNDLES = {
-	{ id = PRODUCT_COINS_1K,  amount = 1000,  label = "+1,000 Coins" },
-	{ id = PRODUCT_COINS_5K,  amount = 5000,  label = "+5,000 Coins" },
-	{ id = PRODUCT_COINS_15K, amount = 15000, label = "+15,000 Coins" },
+	{ id = PRODUCT_COINS_1K,  amount = 1000,  label = "+1,000 Coins",  robux = 49 },
+	{ id = PRODUCT_COINS_5K,  amount = 5000,  label = "+5,000 Coins",  robux = 149 },
+	{ id = PRODUCT_COINS_15K, amount = 15000, label = "+15,000 Coins", robux = 249 },
 }
-local THEME_PRODUCTS = { themeNeon = PRODUCT_THEME_NEON, themeSunset = PRODUCT_THEME_SUNSET }
+local ROBUX_VIP = 299
+
+-- Tema urunleri: magaza kalemi -> tema adi, Robux urunu ve fiyati
+local THEME_ITEMS = {
+	themeNeon   = { theme = "Neon",   product = PRODUCT_THEME_NEON,   robux = 79 },
+	themeSunset = { theme = "Sunset", product = PRODUCT_THEME_SUNSET, robux = 119 },
+}
 
 local function promptProduct(productId)
 	pcall(function()
@@ -2178,7 +2189,7 @@ local function buildRobuxRows()
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 22,
 			}, row)
-			robuxButton(row, "R$ BUY", -10, 96, function()
+			robuxButton(row, "R$ " .. bundle.robux, -10, 96, function()
 				promptProduct(bundle.id)
 			end)
 		end
@@ -2224,7 +2235,7 @@ local function buildRobuxRows()
 				ZIndex = 22,
 			}, row)
 		else
-			robuxButton(row, "R$ BUY", -10, 96, function()
+			robuxButton(row, "R$ " .. ROBUX_VIP, -10, 96, function()
 				promptGamePass(GAMEPASS_2X_COINS)
 			end)
 		end
@@ -2233,9 +2244,9 @@ local function buildRobuxRows()
 	-- Robux ile alinabilen temalar (coin ile de COIN sekmesinden alinabilir)
 	local themeRows = {}
 	for _, item in ipairs(SHOP) do
-		local productId = THEME_PRODUCTS[item.id]
-		if productId and productId ~= 0 and S.up[item.id] < item.max then
-			table.insert(themeRows, { item = item, productId = productId })
+		local info = THEME_ITEMS[item.id]
+		if info and info.product ~= 0 and S.up[item.id] < item.max then
+			table.insert(themeRows, { item = item, info = info })
 		end
 	end
 	if #themeRows > 0 then
@@ -2255,8 +2266,8 @@ local function buildRobuxRows()
 				TextTruncate = Enum.TextTruncate.AtEnd,
 				ZIndex = 22,
 			}, row)
-			robuxButton(row, "R$ BUY", -10, 96, function()
-				promptProduct(entry.productId)
+			robuxButton(row, "R$ " .. entry.info.robux, -10, 96, function()
+				promptProduct(entry.info.product)
 			end)
 		end
 	end
@@ -2320,7 +2331,18 @@ local function buildShopRows()
 			ZIndex = 22,
 		}, row)
 		corner(buyButton, 18)   -- tam yuvarlak pill
-		if lv >= item.max then
+		local themeInfo = THEME_ITEMS[item.id]
+		if lv >= item.max and themeInfo then
+			-- Alinmis tema: kusanma/cikarma dugmesi. Cikarinca varsayilan Light'a doner.
+			local active = (currentTheme == themeInfo.theme)
+			buyButton.Text = active and "UNEQUIP" or "EQUIP"
+			buyButton.BackgroundColor3 = active and hex("00C853") or ACCENT
+			buyButton.TextColor3 = WHITE_TEXT
+			buyButton.Activated:Connect(function()
+				if not S.loaded then return end
+				setTheme(active and "Light" or themeInfo.theme)
+			end)
+		elseif lv >= item.max then
 			buyButton.Text = "MAX"
 			buyButton.BackgroundColor3 = t.button
 			buyButton.TextColor3 = t.statLabel
