@@ -1,4 +1,11 @@
-# Neon Merge 2048 v3 — Kurulum ve Rehber
+# Neon Merge 2048 v3.1 — Kurulum ve Rehber
+
+## v3.1'de Yeni: Temiz 2D Sahne + Modern UI Derinliği
+
+- **3D karakter tamamen kapalı:** sunucuda `Players.CharacterAutoSpawn = false` + doğan karakter anında kaldırılır; istemcide kamera `Scriptable` kilitlenir. Oyun saf 2D ekran.
+- **UI derinliği:** board, mağaza modalı, stat kutuları ve header butonlarına tema uyumlu ince `UIStroke` (Light `#D0D0D0`, Dark `#3A3A40`, kalınlık 1.5); tema geçişinde stroke da tween'lenir.
+- **Coin ikonu:** HUD ve mağaza fiyat butonlarındaki emoji yerine altın daire + "$" ikonu (asset bağımsız).
+- **Büyük header:** başlık 24pt, üst bar 54px, butonlar 44px yükseklik / 16pt (UNDO 80, NEW 64, SHOP 72, tema 48 genişlik).
 
 ## Kurulum
 

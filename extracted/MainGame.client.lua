@@ -26,6 +26,21 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+-- 3D dunya kapali: kamera Scriptable kilitlenir, bos gokyuzune bakar;
+-- oyun tamamen ScreenGui uzerinde calisir
+local function lockCamera()
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = CFrame.new(0, 1000, 0)
+		camera:GetPropertyChangedSignal("CameraType"):Connect(function()
+			camera.CameraType = Enum.CameraType.Scriptable
+		end)
+	end
+end
+lockCamera()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(lockCamera)
+
 -- ========================================================================
 -- 1. CONFIG
 -- ========================================================================
@@ -53,6 +68,8 @@ local THEMES = {
 		buttonText = hex("3C3C3C"),
 		statValue  = hex("3C3C3C"),
 		statLabel  = hex("8A8A8A"),
+		stroke     = hex("D0D0D0"),
+		strokeT    = 0.2,
 	},
 	Dark = {
 		screen     = hex("121212"),
@@ -63,6 +80,8 @@ local THEMES = {
 		buttonText = hex("EAE6DF"),
 		statValue  = hex("EAE6DF"),
 		statLabel  = hex("9A968F"),
+		stroke     = hex("3A3A40"),
+		strokeT    = 0.2,
 	},
 }
 
@@ -274,6 +293,43 @@ local function corner(parent, radius)
 	return make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
 end
 
+-- "Hover card" derinlik efekti: kart konteynerlerine ince UIStroke;
+-- renk/saydamlik tema gecisinde topluca tween'lenir
+local strokes = {}
+local function stroke(parent)
+	local st = make("UIStroke", {
+		Thickness = 1.5,
+		Color = THEMES.Light.stroke,
+		Transparency = THEMES.Light.strokeT,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, parent)
+	table.insert(strokes, st)
+	return st
+end
+
+-- Coin ikonu: altin daire + kalin "$" (asset bagimsiz, her temada net gorunur)
+local function coinIcon(parent, size, zindex)
+	local icon = make("Frame", {
+		Name = "CoinIcon",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = UDim2.fromOffset(size, size),
+		BackgroundColor3 = hex("FFD700"),
+		BorderSizePixel = 0,
+		ZIndex = zindex or 2,
+	}, parent)
+	make("UICorner", { CornerRadius = UDim.new(1, 0) }, icon)
+	make("TextLabel", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = "$",
+		TextColor3 = Color3.fromRGB(120, 85, 0),
+		TextScaled = true,
+		ZIndex = (zindex or 2) + 1,
+	}, icon)
+	return icon
+end
+
 local gui = make("ScreenGui", {
 	Name = "NeonMerge2048",
 	ResetOnSpawn = false,
@@ -294,53 +350,54 @@ local container = make("Frame", {
 	Size = UDim2.fromScale(0.94, 0.94),
 	BackgroundTransparency = 1,
 }, screenBg)
-make("UISizeConstraint", { MaxSize = Vector2.new(450, 566) }, container)
+make("UISizeConstraint", { MaxSize = Vector2.new(450, 578) }, container)
 
--- Header satir 1: baslik + butonlar (UNDO / NEW / SHOP / tema)
+-- Header satir 1: baslik + butonlar (UNDO / NEW / SHOP / tema), 54px
 local headerTop = make("Frame", {
 	Name = "HeaderTop",
-	Size = UDim2.new(1, 0, 0, 44),
+	Size = UDim2.new(1, 0, 0, 54),
 	BackgroundTransparency = 1,
 }, container)
 
 local title = make("TextLabel", {
 	Name = "Title",
-	Size = UDim2.new(0.4, 0, 1, 0),
+	Size = UDim2.new(1, -292, 1, 0),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBlack,
 	Text = "Neon Merge\n2048",
 	TextScaled = true,
 	TextXAlignment = Enum.TextXAlignment.Left,
 }, headerTop)
-make("UITextSizeConstraint", { MaxTextSize = 17 }, title)
+make("UITextSizeConstraint", { MaxTextSize = 24 }, title)
 
 local function headerButton(name, text, width, rightOffset)
 	local b = make("TextButton", {
 		Name = name,
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, rightOffset, 0.5, 0),
-		Size = UDim2.fromOffset(width, 38),
+		Size = UDim2.fromOffset(width, 44),
 		Font = Enum.Font.GothamBold,
 		Text = text,
-		TextSize = 14,
+		TextSize = 16,
 		AutoButtonColor = true,
 		BorderSizePixel = 0,
 	}, headerTop)
 	corner(b, TILE_RADIUS)
+	stroke(b)
 	return b
 end
 
-local themeButton = headerButton("ThemeToggle", "🌙", 42, 0)
-local shopButton  = headerButton("Shop", "SHOP", 58, -48)
-local newButton   = headerButton("NewGame", "NEW", 52, -112)
-local undoButton  = headerButton("Undo", "UNDO 0", 66, -170)
+local themeButton = headerButton("ThemeToggle", "🌙", 48, 0)
+local shopButton  = headerButton("Shop", "SHOP", 72, -54)
+local newButton   = headerButton("NewGame", "NEW", 64, -132)
+local undoButton  = headerButton("Undo", "UNDO 0", 80, -202)
 undoButton.Visible = false
-undoButton.TextSize = 12
+undoButton.TextSize = 14
 
 -- Header satir 2: SCORE / BEST / COINS
 local headerStats = make("Frame", {
 	Name = "HeaderStats",
-	Position = UDim2.new(0, 0, 0, 50),
+	Position = UDim2.new(0, 0, 0, 60),
 	Size = UDim2.new(1, 0, 0, 50),
 	BackgroundTransparency = 1,
 }, container)
@@ -372,22 +429,29 @@ local function makeStat(name, caption, index)
 		TextScaled = true,
 	}, frame)
 	make("UITextSizeConstraint", { MaxTextSize = 20 }, value)
+	stroke(frame)
 	return frame, cap, value
 end
 
 local scoreFrame, scoreCap, scoreValue = makeStat("Score", "SCORE", 1)
 local bestFrame,  bestCap,  bestValue  = makeStat("Best",  "BEST",  2)
-local coinFrame,  coinCap,  coinValue  = makeStat("Coins", "COINS 🪙", 3)
+local coinFrame,  coinCap,  coinValue  = makeStat("Coins", "COINS", 3)
+
+-- Coin kutusuna ikon: deger sola kayar, altin "$" dairesi basa gelir
+coinIcon(coinFrame, 18, 2).Position = UDim2.new(0, 8, 0, 31)
+coinValue.Position = UDim2.new(0, 28, 0, 17)
+coinValue.Size = UDim2.new(1, -34, 1, -21)
 
 -- Board: dis cerceve > gridFrame (hucreler) + animLayer (kayan ghost tile'lar)
 local board = make("Frame", {
 	Name = "Board",
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 108),
-	Size = UDim2.new(1, 0, 1, -108),
+	Position = UDim2.new(0.5, 0, 0, 120),
+	Size = UDim2.new(1, 0, 1, -120),
 	BorderSizePixel = 0,
 }, container)
 corner(board, BOARD_RADIUS)
+stroke(board)
 make("UIAspectRatioConstraint", {
 	AspectRatio = 1,
 	AspectType = Enum.AspectType.FitWithinMaxSize,
@@ -533,6 +597,7 @@ local shopModal = make("Frame", {
 	ZIndex = 20,
 }, container)
 corner(shopModal, BOARD_RADIUS)
+stroke(shopModal)
 make("UIPadding", {
 	PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
 	PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
@@ -618,6 +683,9 @@ local function applyTheme(name)
 	end
 	for _, valLabel in ipairs({ scoreValue, bestValue, coinValue }) do
 		tween(valLabel, { TextColor3 = t.statValue })
+	end
+	for _, st in ipairs(strokes) do
+		tween(st, { Color = t.stroke, Transparency = t.strokeT })
 	end
 	for r = 1, S.size do
 		for c = 1, S.size do
@@ -746,7 +814,7 @@ end)
 local function showOver(earned)
 	overTitle.Text = "Game Over"
 	-- earned nil ise (resync yolu) odul metni gosterilmez; kesin degeri NM_Sync yazar
-	overSub.Text = earned and ("+" .. earned .. " 🪙") or ""
+	overSub.Text = earned and ("+" .. earned .. " COINS") or ""
 	primaryButton.Text = "New Game"
 	secondaryButton.Visible = false
 	overlay.Visible = true
@@ -870,7 +938,7 @@ SyncEvent.OnClientEvent:Connect(function(p)
 		S.coins = p.coins or S.coins
 		S.best = math.max(S.best, p.best or 0)
 		if overlay.Visible and not secondaryButton.Visible then
-			overSub.Text = "+" .. (p.earned or 0) .. " 🪙"
+			overSub.Text = "+" .. (p.earned or 0) .. " COINS"
 		end
 		updateHUD()
 	elseif p.ev == "win" then
@@ -947,14 +1015,26 @@ local function buildShopRows()
 			buyButton.BackgroundColor3 = t.button
 			buyButton.TextColor3 = t.statLabel
 		else
+			-- Fiyat: coin ikonu + tutar (duz emoji yerine ikonlu buton)
 			local cost = item.costs[lv + 1]
-			buyButton.Text = cost .. " 🪙"
+			buyButton.Text = ""
+			coinIcon(buyButton, 16, 23).Position = UDim2.new(0, 10, 0.5, 0)
+			local priceLabel = make("TextLabel", {
+				Position = UDim2.new(0, 32, 0, 0),
+				Size = UDim2.new(1, -38, 1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = tostring(cost),
+				TextSize = 13,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 23,
+			}, buyButton)
 			if S.coins >= cost then
 				buyButton.BackgroundColor3 = ACCENT
-				buyButton.TextColor3 = WHITE_TEXT
+				priceLabel.TextColor3 = WHITE_TEXT
 			else
 				buyButton.BackgroundColor3 = t.button
-				buyButton.TextColor3 = t.statLabel
+				priceLabel.TextColor3 = t.statLabel
 			end
 			buyButton.Activated:Connect(function()
 				local res = act({ a = "buy", id = item.id })

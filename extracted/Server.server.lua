@@ -35,6 +35,9 @@ local TOP_CACHE_SECONDS = 60
 local store    = DataStoreService:GetDataStore(STORE_NAME)
 local topStore = DataStoreService:GetOrderedDataStore(TOP_STORE_NAME)
 
+-- 3D karakter tamamen kapali: oyun saf 2D ScreenGui, avatar hic dogmaz
+Players.CharacterAutoSpawn = false
+
 -- ========================================================================
 -- MAGAZA KATALOGU (istemciyle birebir ayni tutulmali)
 -- ========================================================================
@@ -477,6 +480,17 @@ SyncEvent.Parent = ReplicatedStorage
 -- Oyuncu akisi
 -- ========================================================================
 local function onPlayerAdded(playerObj)
+	-- CharacterAutoSpawn kapali olsa da baska bir betik LoadCharacter cagirirsa
+	-- karakteri aninda kaldir; 3D dunyada avatar asla gorunmez
+	playerObj.CharacterAdded:Connect(function(character)
+		task.defer(function()
+			if character.Parent then character:Destroy() end
+		end)
+	end)
+	if playerObj.Character then
+		playerObj.Character:Destroy()
+	end
+
 	local session = { data = nil, loaded = false, dirty = false, lastWrite = 0, topWritten = 0 }
 	sessions[playerObj] = session
 	session.data = loadData(playerObj.UserId)
