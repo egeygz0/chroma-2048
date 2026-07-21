@@ -1,6 +1,6 @@
 # Neon Merge 2048
 
-Canlı renkli, light/dark temalı 2D 2048 Roblox oyunu (Luau). Tüm arayüz LocalScript tarafından runtime'da üretilir, Studio'da elle UI kurulumu gerekmez. Oyuncu verisi (skor, en iyi skor, yarım kalan tahta, tema tercihi) DataStore ile kalıcı kaydedilir: oyuncu çıkıp girince kaldığı yerden devam eder.
+Canlı renkli, light/dark temalı 2D 2048 Roblox oyunu (Luau). Tüm arayüz LocalScript tarafından runtime'da üretilir, Studio'da elle UI kurulumu gerekmez. Oyun mantığı **sunucu-otoriterdir** (istemci yalnızca hamle yönü gönderir); tur bitince skor coin'e çevrilir, coin'le upgrade alınır (Lucky Spawns, Head Start, Undo, Coin Rush, 5x5 tahta). Mobil swipe, kayma animasyonu, 2048 kutlaması ve global top 10 leaderboard vardır. Oyuncu verisi (coin, best, upgrade'ler, yarım kalan tur, tema) DataStore ile kalıcıdır: çıkıp giren kaldığı yerden devam eder.
 
 ## Dosyalar
 

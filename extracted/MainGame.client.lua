@@ -1,17 +1,20 @@
 --[[
-	NEON MERGE 2048 — istemci (StarterPlayer > StarterPlayerScripts > LocalScript)
+	NEON MERGE 2048 v3 — istemci (StarterPlayer > StarterPlayerScripts > LocalScript)
 
 	Mimari:
-	1. CONFIG      : tema tablolari, canli tile paleti, sabitler
-	2. REMOTES     : sunucu kayit protokolu (NM_GetData / NM_Save)
-	3. UI BUILD    : ScreenGui + header + 4x4 board, tamamen programatik (UICorner her yerde)
-	4. THEME       : state-tabanli tema yoneticisi, TweenService ile yumusak gecis
-	5. CORE        : 4x4 matris, slide/merge/spawn, skor, game-over tespiti
-	6. PERSISTENCE : giriste sunucudan yukle, her hamlede sunucuya gonder
-	7. INPUT       : UserInputService (WASD + ok tuslari), debounce
-	8. ANIM        : UIScale pop-in (0.8 -> 1.05 -> 1.0), 2048+ icin neon hue dongusu
+	1. CONFIG      : tema tablolari, tile paleti, magaza katalogu, sabitler
+	2. CORE SIM    : sunucuyla birebir ayni deterministik oyun cekirdegi
+	3. REMOTES     : NM_GetData / NM_Act / NM_Move / NM_Sync
+	4. UI BUILD    : header (2 satir HUD) + board (grid + anim katmani) + overlay + magaza
+	5. THEME       : state-tabanli tema yoneticisi, TweenService gecisleri
+	6. RENDER/ANIM : kayma animasyonu (ghost tile), pop-in (0.8 -> 1.05 -> 1.0), neon hue
+	7. GAME FLOW   : hamle (lokal sim + sunucuya bildir), undo, yeni oyun, 4x4/5x5
+	8. SHOP UI     : coin magazasi + TOP 10 leaderboard sekmesi
+	9. INPUT       : klavye (WASD + ok) ve mobil swipe (TouchSwipe), debounce
 
-	NOT: Server.server.lua olmadan kayit calismaz; iki dosyayi birlikte guncelle.
+	Sunucu-otoriter: skor/coin/kayit otoritesi sunucudadir; istemci ayni simulasyonu
+	gorsel icin lokal oynatir (deterministik spawn: seed + spawnIndex).
+	NOT: Server.server.lua olmadan calismaz; iki dosyayi birlikte guncelle.
 ]]
 
 local Players           = game:GetService("Players")
@@ -26,10 +29,10 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- ========================================================================
 -- 1. CONFIG
 -- ========================================================================
-local GRID          = 4
 local BOARD_RADIUS  = 16
 local TILE_RADIUS   = 12
-local MOVE_DEBOUNCE = 0.14
+local MOVE_DEBOUNCE = 0.13
+local SLIDE_TIME    = 0.09
 local THEME_TWEEN   = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local function hex(h)
@@ -77,23 +80,188 @@ local TILE_COLORS = {
 	[2048] = hex("00E676"), -- 2048+ taban rengi; Heartbeat'te hue dongusuyle ezilir
 }
 
+local ACCENT     = hex("2979FF")
 local DARK_TEXT  = Color3.fromRGB(55, 55, 55)
 local WHITE_TEXT = Color3.new(1, 1, 1)
 
--- Parlaklik uzerinden kontrast metin rengi (rainbow dongusunde de kullanilir)
 local function textColorFor(bg)
 	local lum = 0.299 * bg.R + 0.587 * bg.G + 0.114 * bg.B
 	return (lum > 0.62) and DARK_TEXT or WHITE_TEXT
 end
 
--- ========================================================================
--- 2. REMOTES (Server.server.lua olusturur)
--- ========================================================================
-local GetData   = ReplicatedStorage:WaitForChild("NM_GetData")   -- RemoteFunction
-local SaveEvent = ReplicatedStorage:WaitForChild("NM_Save")      -- RemoteEvent
+-- MAGAZA KATALOGU (sunucuyla birebir ayni tutulmali; metinler yalnizca istemcide)
+local SHOP = {
+	{ id = "spawn", max = 5, costs = { 50, 100, 200, 400, 800 },
+	  name = "Lucky Spawns", desc = "+10% chance of 4s per level, 8s at Lv4+" },
+	{ id = "start", max = 3, costs = { 150, 400, 1000 },
+	  name = "Head Start", desc = "Start each run with a bonus tile (8/16/32)" },
+	{ id = "undo",  max = 3, costs = { 100, 300, 700 },
+	  name = "Undo", desc = "+1 undo per run per level" },
+	{ id = "coin",  max = 4, costs = { 200, 500, 1200, 2500 },
+	  name = "Coin Rush", desc = "+25% coins earned per level" },
+	{ id = "grid5", max = 1, costs = { 3000 },
+	  name = "5x5 Board", desc = "Unlock the big board (switch in shop)" },
+}
+
+local function tileBonus(maxTile)
+	if maxTile >= 4096 then return 400
+	elseif maxTile >= 2048 then return 150
+	elseif maxTile >= 1024 then return 60
+	elseif maxTile >= 512 then return 25
+	elseif maxTile >= 256 then return 10 end
+	return 0
+end
+
+local function coinsForRun(score, maxTile, coinLv)
+	local base = math.floor(score / 100) + tileBonus(maxTile)
+	return math.floor(base * (1 + 0.25 * coinLv))
+end
 
 -- ========================================================================
--- 3. UI BUILD
+-- 2. CORE SIM (sunucu ile birebir ayni tutulmali)
+-- ========================================================================
+local DIRECTIONS = {
+	Left  = function(i, n) local t = {} for j = 1, n do t[j] = { i, j } end return t end,
+	Right = function(i, n) local t = {} for j = 1, n do t[j] = { i, n - j + 1 } end return t end,
+	Up    = function(i, n) local t = {} for j = 1, n do t[j] = { j, i } end return t end,
+	Down  = function(i, n) local t = {} for j = 1, n do t[j] = { n - j + 1, i } end return t end,
+}
+
+local function deepCopy(t)
+	if type(t) ~= "table" then return t end
+	local out = {}
+	for k, v in pairs(t) do out[k] = deepCopy(v) end
+	return out
+end
+
+local function processLine(line)
+	local n = #line
+	local vals = {}
+	for idx, v in ipairs(line) do
+		if v ~= 0 then table.insert(vals, { v = v, src = idx }) end
+	end
+	local out, mergedAt, srcMap, gained = {}, {}, {}, 0
+	local i = 1
+	while i <= #vals do
+		local cur, nxt = vals[i], vals[i + 1]
+		if nxt and cur.v == nxt.v then
+			table.insert(out, cur.v * 2)
+			mergedAt[#out] = true
+			srcMap[#out] = { cur.src, nxt.src }
+			gained += cur.v * 2
+			i += 2
+		else
+			table.insert(out, cur.v)
+			srcMap[#out] = { cur.src }
+			i += 1
+		end
+	end
+	while #out < n do table.insert(out, 0) end
+	return out, mergedAt, srcMap, gained
+end
+
+local function simMove(board, n, dir)
+	local coordFn = DIRECTIONS[dir]
+	local changed = false
+	local gainedTotal = 0
+	local anims = {}
+	local popSet = {}
+	for i = 1, n do
+		local coords = coordFn(i, n)
+		local line = {}
+		for j, rc in ipairs(coords) do line[j] = board[rc[1]][rc[2]] end
+		local out, mergedAt, srcMap, gained = processLine(line)
+		gainedTotal += gained
+		for j, rc in ipairs(coords) do
+			if out[j] ~= line[j] then changed = true end
+			if srcMap[j] then
+				for _, src in ipairs(srcMap[j]) do
+					local s = coords[src]
+					table.insert(anims, {
+						fr = s[1], fc = s[2], tr = rc[1], tc = rc[2],
+						v = line[src], merged = mergedAt[j] or false,
+					})
+				end
+				if mergedAt[j] then popSet[rc[1] .. "_" .. rc[2]] = true end
+			end
+			board[rc[1]][rc[2]] = out[j]
+		end
+	end
+	return changed, gainedTotal, anims, popSet
+end
+
+local function spawnTile(board, n, seed, spawnIndex, spawnLv)
+	local empties = {}
+	for r = 1, n do
+		for c = 1, n do
+			if board[r][c] == 0 then table.insert(empties, { r, c }) end
+		end
+	end
+	if #empties == 0 then return nil end
+	local rng = Random.new(seed + spawnIndex * 7919)
+	local pick = empties[rng:NextInteger(1, #empties)]
+	local fourChance = math.min(0.1 + 0.1 * spawnLv, 0.6)
+	local eightChance = 0.05 * math.max(0, spawnLv - 3)
+	local roll = rng:NextNumber()
+	local v = 2
+	if roll < eightChance then v = 8
+	elseif roll < eightChance + fourChance then v = 4 end
+	board[pick[1]][pick[2]] = v
+	return pick[1], pick[2], v
+end
+
+local function hasMoves(board, n)
+	for r = 1, n do
+		for c = 1, n do
+			local v = board[r][c]
+			if v == 0 then return true end
+			if c < n and board[r][c + 1] == v then return true end
+			if r < n and board[r + 1][c] == v then return true end
+		end
+	end
+	return false
+end
+
+local function boardMax(board, n)
+	local m = 0
+	for r = 1, n do
+		for c = 1, n do
+			if board[r][c] > m then m = board[r][c] end
+		end
+	end
+	return m
+end
+-- ==================== CORE SIM SONU ====================
+
+-- ========================================================================
+-- 3. REMOTES (Server.server.lua olusturur)
+-- ========================================================================
+local GetData   = ReplicatedStorage:WaitForChild("NM_GetData")   -- RemoteFunction
+local Act       = ReplicatedStorage:WaitForChild("NM_Act")       -- RemoteFunction
+local MoveEvent = ReplicatedStorage:WaitForChild("NM_Move")      -- RemoteEvent (C->S)
+local SyncEvent = ReplicatedStorage:WaitForChild("NM_Sync")      -- RemoteEvent (S->C)
+
+local function act(req)
+	local ok, res = pcall(function()
+		return Act:InvokeServer(req)
+	end)
+	if ok and type(res) == "table" then return res end
+	return nil
+end
+
+-- ========================================================================
+-- Oyun durumu
+-- ========================================================================
+local S = {
+	loaded = false, busy = false, shopOpen = false,
+	size = 4, board = nil, score = 0, best = 0, coins = 0,
+	seed = 1, spawns = 0, undoLeft = 0, won = false, over = false,
+	up = { spawn = 0, start = 0, undo = 0, coin = 0, grid5 = 0 },
+}
+local currentTheme = "Light"
+
+-- ========================================================================
+-- 4. UI BUILD
 -- ========================================================================
 local function make(className, props, parent)
 	local inst = Instance.new(className)
@@ -119,42 +287,71 @@ local screenBg = make("Frame", {
 	BorderSizePixel = 0,
 }, gui)
 
--- Ana konteyner: ortali, board icin 1:1 oran, max 450px genislik
 local container = make("Frame", {
 	Name = "Container",
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromScale(0.92, 0.92),
+	Size = UDim2.fromScale(0.94, 0.94),
 	BackgroundTransparency = 1,
 }, screenBg)
-make("UISizeConstraint", { MaxSize = Vector2.new(450, 530) }, container)
+make("UISizeConstraint", { MaxSize = Vector2.new(450, 566) }, container)
 
-local header = make("Frame", {
-	Name = "Header",
-	Size = UDim2.new(1, 0, 0, 60),
+-- Header satir 1: baslik + butonlar (UNDO / NEW / SHOP / tema)
+local headerTop = make("Frame", {
+	Name = "HeaderTop",
+	Size = UDim2.new(1, 0, 0, 44),
 	BackgroundTransparency = 1,
 }, container)
 
 local title = make("TextLabel", {
 	Name = "Title",
-	Size = UDim2.new(0.38, 0, 1, 0),
+	Size = UDim2.new(0.4, 0, 1, 0),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBlack,
 	Text = "Neon Merge\n2048",
 	TextScaled = true,
 	TextXAlignment = Enum.TextXAlignment.Left,
-}, header)
-make("UITextSizeConstraint", { MaxTextSize = 22 }, title)
+}, headerTop)
+make("UITextSizeConstraint", { MaxTextSize = 17 }, title)
 
--- SCORE / BEST kutulari
-local function makeStat(name, caption, rightOffset)
-	local frame = make("Frame", {
+local function headerButton(name, text, width, rightOffset)
+	local b = make("TextButton", {
 		Name = name,
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, rightOffset, 0.5, 0),
-		Size = UDim2.fromOffset(82, 48),
+		Size = UDim2.fromOffset(width, 38),
+		Font = Enum.Font.GothamBold,
+		Text = text,
+		TextSize = 14,
+		AutoButtonColor = true,
 		BorderSizePixel = 0,
-	}, header)
+	}, headerTop)
+	corner(b, TILE_RADIUS)
+	return b
+end
+
+local themeButton = headerButton("ThemeToggle", "🌙", 42, 0)
+local shopButton  = headerButton("Shop", "SHOP", 58, -48)
+local newButton   = headerButton("NewGame", "NEW", 52, -112)
+local undoButton  = headerButton("Undo", "UNDO 0", 66, -170)
+undoButton.Visible = false
+undoButton.TextSize = 12
+
+-- Header satir 2: SCORE / BEST / COINS
+local headerStats = make("Frame", {
+	Name = "HeaderStats",
+	Position = UDim2.new(0, 0, 0, 50),
+	Size = UDim2.new(1, 0, 0, 50),
+	BackgroundTransparency = 1,
+}, container)
+
+local function makeStat(name, caption, index)
+	local frame = make("Frame", {
+		Name = name,
+		Position = UDim2.new((index - 1) / 3, (index - 1) * 3, 0, 0),
+		Size = UDim2.new(1 / 3, -6, 1, 0),
+		BorderSizePixel = 0,
+	}, headerStats)
 	corner(frame, TILE_RADIUS)
 	local cap = make("TextLabel", {
 		Name = "Caption",
@@ -167,8 +364,8 @@ local function makeStat(name, caption, rightOffset)
 	}, frame)
 	local value = make("TextLabel", {
 		Name = "Value",
-		Position = UDim2.new(0, 0, 0, 17),
-		Size = UDim2.new(1, 0, 1, -21),
+		Position = UDim2.new(0, 4, 0, 17),
+		Size = UDim2.new(1, -8, 1, -21),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBlack,
 		Text = "0",
@@ -178,27 +375,16 @@ local function makeStat(name, caption, rightOffset)
 	return frame, cap, value
 end
 
-local scoreFrame, scoreCap, scoreValue = makeStat("Score", "SCORE", -142)
-local bestFrame,  bestCap,  bestValue  = makeStat("Best",  "BEST",  -54)
+local scoreFrame, scoreCap, scoreValue = makeStat("Score", "SCORE", 1)
+local bestFrame,  bestCap,  bestValue  = makeStat("Best",  "BEST",  2)
+local coinFrame,  coinCap,  coinValue  = makeStat("Coins", "COINS 🪙", 3)
 
-local themeButton = make("TextButton", {
-	Name = "ThemeToggle",
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, 0, 0.5, 0),
-	Size = UDim2.fromOffset(46, 48),
-	Font = Enum.Font.GothamBold,
-	Text = "🌙",
-	TextSize = 22,
-	AutoButtonColor = true,
-	BorderSizePixel = 0,
-}, header)
-corner(themeButton, TILE_RADIUS)
-
+-- Board: dis cerceve > gridFrame (hucreler) + animLayer (kayan ghost tile'lar)
 local board = make("Frame", {
 	Name = "Board",
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 70),
-	Size = UDim2.new(1, 0, 1, -70),
+	Position = UDim2.new(0.5, 0, 0, 108),
+	Size = UDim2.new(1, 0, 1, -108),
 	BorderSizePixel = 0,
 }, container)
 corner(board, BOARD_RADIUS)
@@ -210,49 +396,77 @@ make("UIPadding", {
 	PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
 	PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
 }, board)
-make("UIGridLayout", {
+
+local gridFrame = make("Frame", {
+	Name = "GridFrame",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+}, board)
+
+local gridLayout = make("UIGridLayout", {
 	CellSize = UDim2.new(0.25, -8, 0.25, -8),
 	CellPadding = UDim2.fromOffset(10, 10),
 	FillDirection = Enum.FillDirection.Horizontal,
-	FillDirectionMaxCells = GRID,
+	FillDirectionMaxCells = 4,
 	HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	VerticalAlignment = Enum.VerticalAlignment.Center,
 	SortOrder = Enum.SortOrder.LayoutOrder,
+}, gridFrame)
+
+local animLayer = make("Frame", {
+	Name = "AnimLayer",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	ZIndex = 5,
 }, board)
 
--- 16 hucre (bos zemin) + her birinde gizli tile etiketi
 local cells = {}   -- cells[r][c] = { frame, tile, scale }
-for r = 1, GRID do
-	cells[r] = {}
-	for c = 1, GRID do
-		local cell = make("Frame", {
-			Name = ("Cell_%d_%d"):format(r, c),
-			LayoutOrder = (r - 1) * GRID + c,
-			BorderSizePixel = 0,
-		}, board)
-		corner(cell, TILE_RADIUS)
 
-		local tile = make("TextLabel", {
-			Name = "Tile",
-			Size = UDim2.fromScale(1, 1),
-			BorderSizePixel = 0,
-			Font = Enum.Font.GothamBlack,
-			Text = "",
-			TextScaled = true,
-			Visible = false,
-			ZIndex = 2,
-		}, cell)
-		corner(tile, TILE_RADIUS)
-		make("UITextSizeConstraint", { MaxTextSize = 40 }, tile)
-		local scale = make("UIScale", { Scale = 1 }, tile)
+local function buildGrid(n)
+	for _, child in ipairs(gridFrame:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local pad = (n == 4) and 10 or 8
+	gridLayout.CellPadding = UDim2.fromOffset(pad, pad)
+	gridLayout.CellSize = UDim2.new(1 / n, -pad, 1 / n, -pad)
+	gridLayout.FillDirectionMaxCells = n
+	cells = {}
+	local emptyColor = THEMES[currentTheme].empty
+	for r = 1, n do
+		cells[r] = {}
+		for c = 1, n do
+			local cell = make("Frame", {
+				Name = ("Cell_%d_%d"):format(r, c),
+				LayoutOrder = (r - 1) * n + c,
+				BackgroundColor3 = emptyColor,
+				BorderSizePixel = 0,
+			}, gridFrame)
+			corner(cell, TILE_RADIUS)
 
-		cells[r][c] = { frame = cell, tile = tile, scale = scale }
+			local tile = make("TextLabel", {
+				Name = "Tile",
+				Size = UDim2.fromScale(1, 1),
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBlack,
+				Text = "",
+				TextScaled = true,
+				Visible = false,
+				ZIndex = 2,
+			}, cell)
+			corner(tile, TILE_RADIUS)
+			make("UITextSizeConstraint", { MaxTextSize = 40 }, tile)
+			local scale = make("UIScale", { Scale = 1 }, tile)
+
+			cells[r][c] = { frame = cell, tile = tile, scale = scale }
+		end
 	end
 end
 
--- Game-over katmani
+buildGrid(4)
+
+-- Game over / win katmani
 local overlay = make("Frame", {
-	Name = "GameOver",
+	Name = "RunOverlay",
 	Size = UDim2.fromScale(1, 1),
 	BackgroundColor3 = Color3.fromRGB(15, 15, 15),
 	BackgroundTransparency = 0.35,
@@ -261,10 +475,10 @@ local overlay = make("Frame", {
 }, board)
 corner(overlay, BOARD_RADIUS)
 
-local overText = make("TextLabel", {
+local overTitle = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.4),
-	Size = UDim2.fromScale(0.8, 0.2),
+	Position = UDim2.fromScale(0.5, 0.32),
+	Size = UDim2.fromScale(0.85, 0.18),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBlack,
 	Text = "Game Over",
@@ -272,30 +486,116 @@ local overText = make("TextLabel", {
 	TextScaled = true,
 	ZIndex = 11,
 }, overlay)
-make("UITextSizeConstraint", { MaxTextSize = 44 }, overText)
+make("UITextSizeConstraint", { MaxTextSize = 42 }, overTitle)
 
-local restartButton = make("TextButton", {
+local overSub = make("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.62),
-	Size = UDim2.new(0.45, 0, 0, 44),
-	BackgroundColor3 = hex("2979FF"),
+	Position = UDim2.fromScale(0.5, 0.47),
+	Size = UDim2.fromScale(0.85, 0.1),
+	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBold,
-	Text = "Restart",
-	TextColor3 = WHITE_TEXT,
-	TextSize = 20,
-	AutoButtonColor = true,
-	BorderSizePixel = 0,
+	Text = "",
+	TextColor3 = hex("FFD700"),
+	TextScaled = true,
 	ZIndex = 11,
 }, overlay)
-corner(restartButton, TILE_RADIUS)
+make("UITextSizeConstraint", { MaxTextSize = 22 }, overSub)
+
+local function overlayButton(name, text, y, bg)
+	local b = make("TextButton", {
+		Name = name,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, y),
+		Size = UDim2.new(0.5, 0, 0, 42),
+		BackgroundColor3 = bg,
+		Font = Enum.Font.GothamBold,
+		Text = text,
+		TextColor3 = WHITE_TEXT,
+		TextSize = 18,
+		AutoButtonColor = true,
+		BorderSizePixel = 0,
+		ZIndex = 11,
+	}, overlay)
+	corner(b, TILE_RADIUS)
+	return b
+end
+
+local primaryButton   = overlayButton("Primary", "New Game", 0.62, ACCENT)
+local secondaryButton = overlayButton("Secondary", "Continue", 0.75, hex("00C853"))
+secondaryButton.Visible = false
+
+-- Magaza / leaderboard modali
+local shopModal = make("Frame", {
+	Name = "ShopModal",
+	Size = UDim2.fromScale(1, 1),
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 20,
+}, container)
+corner(shopModal, BOARD_RADIUS)
+make("UIPadding", {
+	PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+	PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
+}, shopModal)
+
+local shopTabButton = make("TextButton", {
+	Name = "TabShop",
+	Size = UDim2.fromOffset(80, 34),
+	Font = Enum.Font.GothamBold,
+	Text = "SHOP",
+	TextSize = 15,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 21,
+}, shopModal)
+corner(shopTabButton, TILE_RADIUS)
+
+local topTabButton = make("TextButton", {
+	Name = "TabTop",
+	Position = UDim2.fromOffset(86, 0),
+	Size = UDim2.fromOffset(80, 34),
+	Font = Enum.Font.GothamBold,
+	Text = "TOP 10",
+	TextSize = 15,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 21,
+}, shopModal)
+corner(topTabButton, TILE_RADIUS)
+
+local closeButton = make("TextButton", {
+	Name = "Close",
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 0),
+	Size = UDim2.fromOffset(34, 34),
+	Font = Enum.Font.GothamBold,
+	Text = "X",
+	TextSize = 16,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 21,
+}, shopModal)
+corner(closeButton, TILE_RADIUS)
+
+local shopList = make("ScrollingFrame", {
+	Name = "List",
+	Position = UDim2.new(0, 0, 0, 42),
+	Size = UDim2.new(1, 0, 1, -42),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 4,
+	CanvasSize = UDim2.new(0, 0, 0, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	ZIndex = 21,
+}, shopModal)
+make("UIListLayout", {
+	Padding = UDim.new(0, 8),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, shopList)
 
 -- ========================================================================
--- 4. THEME MANAGER
+-- 5. THEME MANAGER
 -- ========================================================================
-local currentTheme = "Light"
-local loaded = false          -- ilk yukleme bitmeden kayit gonderilmez
-local sendSave                -- ileri bildirim (persistence bolumunde tanimli)
-
 local function tween(inst, props)
 	TweenService:Create(inst, THEME_TWEEN, props):Play()
 end
@@ -305,19 +605,22 @@ local function applyTheme(name)
 	local t = THEMES[name]
 	tween(screenBg, { BackgroundColor3 = t.screen })
 	tween(board, { BackgroundColor3 = t.board })
+	tween(shopModal, { BackgroundColor3 = t.board })
 	tween(title, { TextColor3 = t.text })
-	tween(themeButton, { BackgroundColor3 = t.button, TextColor3 = t.buttonText })
-	for _, statFrame in ipairs({ scoreFrame, bestFrame }) do
+	for _, b in ipairs({ themeButton, shopButton, newButton, undoButton, shopTabButton, topTabButton, closeButton }) do
+		tween(b, { BackgroundColor3 = t.button, TextColor3 = t.buttonText })
+	end
+	for _, statFrame in ipairs({ scoreFrame, bestFrame, coinFrame }) do
 		tween(statFrame, { BackgroundColor3 = t.button })
 	end
-	for _, capLabel in ipairs({ scoreCap, bestCap }) do
+	for _, capLabel in ipairs({ scoreCap, bestCap, coinCap }) do
 		tween(capLabel, { TextColor3 = t.statLabel })
 	end
-	for _, valLabel in ipairs({ scoreValue, bestValue }) do
+	for _, valLabel in ipairs({ scoreValue, bestValue, coinValue }) do
 		tween(valLabel, { TextColor3 = t.statValue })
 	end
-	for r = 1, GRID do
-		for c = 1, GRID do
+	for r = 1, S.size do
+		for c = 1, S.size do
 			tween(cells[r][c].frame, { BackgroundColor3 = t.empty })
 		end
 	end
@@ -326,18 +629,12 @@ end
 
 themeButton.Activated:Connect(function()
 	applyTheme(currentTheme == "Light" and "Dark" or "Light")
-	sendSave()
+	task.spawn(act, { a = "theme", t = currentTheme })
 end)
 
 -- ========================================================================
--- 5. GAME CORE
+-- 6. RENDER + ANIMASYON
 -- ========================================================================
-local grid = {}     -- grid[r][c] = 0 veya tile degeri
-local score = 0
-local best = 0
-local gameOver = false
-
--- 8. ANIM: pop-in (0.8 -> 1.05 -> 1.0)
 local function popTile(scale)
 	scale.Scale = 0.8
 	local up = TweenService:Create(scale,
@@ -349,11 +646,18 @@ local function popTile(scale)
 	end)
 end
 
--- popSet: { ["r_c"] = true } -> bu hucrelerde pop animasyonu oynat
+local function updateHUD()
+	scoreValue.Text = tostring(S.score)
+	bestValue.Text = tostring(S.best)
+	coinValue.Text = tostring(S.coins)
+	undoButton.Text = "UNDO " .. S.undoLeft
+	undoButton.Visible = (S.up.undo > 0)
+end
+
 local function render(popSet)
-	for r = 1, GRID do
-		for c = 1, GRID do
-			local v = grid[r][c]
+	for r = 1, S.size do
+		for c = 1, S.size do
+			local v = S.board[r][c]
 			local cell = cells[r][c]
 			if v == 0 then
 				cell.tile.Visible = false
@@ -369,182 +673,446 @@ local function render(popSet)
 			end
 		end
 	end
-	if score > best then best = score end
-	scoreValue.Text = tostring(score)
-	bestValue.Text = tostring(best)
+	if S.score > S.best then S.best = S.score end
+	updateHUD()
 end
 
-local function spawnTile(popSet)
-	local empties = {}
-	for r = 1, GRID do
-		for c = 1, GRID do
-			if grid[r][c] == 0 then table.insert(empties, { r, c }) end
+-- Kayma animasyonu: eski tahtadaki her tile icin ghost olusturup hedefe tween'ler
+local function playSlide(anims, done)
+	for r = 1, S.size do
+		for c = 1, S.size do
+			cells[r][c].tile.Visible = false
 		end
 	end
-	if #empties == 0 then return end
-	local pick = empties[math.random(#empties)]
-	grid[pick[1]][pick[2]] = (math.random() < 0.9) and 2 or 4
-	if popSet then popSet[pick[1] .. "_" .. pick[2]] = true end
-end
-
--- Tek satir/sutunu hareket yonune dogru sikistir + birlestir
-local function processLine(line)
-	local vals = {}
-	for _, v in ipairs(line) do
-		if v ~= 0 then table.insert(vals, v) end
-	end
-	local out, mergedAt, gained = {}, {}, 0
-	local i = 1
-	while i <= #vals do
-		if vals[i + 1] and vals[i] == vals[i + 1] then
-			local m = vals[i] * 2
-			table.insert(out, m)
-			mergedAt[#out] = true
-			gained += m
-			i += 2
-		else
-			table.insert(out, vals[i])
-			i += 1
+	local layerPos = animLayer.AbsolutePosition
+	local ghosts = {}
+	for _, a in ipairs(anims) do
+		local fromCell = cells[a.fr][a.fc].frame
+		local toCell = cells[a.tr][a.tc].frame
+		local color = TILE_COLORS[math.min(a.v, 2048)] or TILE_COLORS[2048]
+		local ghost = make("TextLabel", {
+			Position = UDim2.fromOffset(
+				fromCell.AbsolutePosition.X - layerPos.X,
+				fromCell.AbsolutePosition.Y - layerPos.Y),
+			Size = UDim2.fromOffset(fromCell.AbsoluteSize.X, fromCell.AbsoluteSize.Y),
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamBlack,
+			Text = tostring(a.v),
+			TextColor3 = textColorFor(color),
+			TextScaled = true,
+			ZIndex = 6,
+		}, animLayer)
+		corner(ghost, TILE_RADIUS)
+		make("UITextSizeConstraint", { MaxTextSize = 40 }, ghost)
+		table.insert(ghosts, ghost)
+		if a.fr ~= a.tr or a.fc ~= a.tc then
+			TweenService:Create(ghost,
+				TweenInfo.new(SLIDE_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Position = UDim2.fromOffset(
+						toCell.AbsolutePosition.X - layerPos.X,
+						toCell.AbsolutePosition.Y - layerPos.Y),
+				}):Play()
 		end
 	end
-	while #out < GRID do table.insert(out, 0) end
-	return out, mergedAt, gained
-end
-
--- Yon basina hucre koordinat siralari (hareket yonundeki uctan baslar)
-local DIRECTIONS = {
-	Left  = function(i) local t = {} for j = 1, GRID do t[j] = { i, j } end return t end,
-	Right = function(i) local t = {} for j = 1, GRID do t[j] = { i, GRID - j + 1 } end return t end,
-	Up    = function(i) local t = {} for j = 1, GRID do t[j] = { j, i } end return t end,
-	Down  = function(i) local t = {} for j = 1, GRID do t[j] = { GRID - j + 1, i } end return t end,
-}
-
-local function isGameOver()
-	for r = 1, GRID do
-		for c = 1, GRID do
-			local v = grid[r][c]
-			if v == 0 then return false end
-			if c < GRID and grid[r][c + 1] == v then return false end
-			if r < GRID and grid[r + 1][c] == v then return false end
-		end
-	end
-	return true
-end
-
-local function checkGameOver()
-	if isGameOver() then
-		gameOver = true
-		overlay.Visible = true
-	end
-end
-
-local function move(direction)
-	local coordFn = DIRECTIONS[direction]
-	local changed = false
-	local popSet = {}
-
-	for i = 1, GRID do
-		local coords = coordFn(i)
-		local line = {}
-		for j, rc in ipairs(coords) do
-			line[j] = grid[rc[1]][rc[2]]
-		end
-		local newLine, mergedAt, gained = processLine(line)
-		score += gained
-		for j, rc in ipairs(coords) do
-			if grid[rc[1]][rc[2]] ~= newLine[j] then changed = true end
-			grid[rc[1]][rc[2]] = newLine[j]
-			if mergedAt[j] then popSet[rc[1] .. "_" .. rc[2]] = true end
-		end
-	end
-
-	if not changed then return false end
-	spawnTile(popSet)
-	render(popSet)
-	checkGameOver()
-	sendSave()
-	return true
-end
-
-local function newGame()
-	score = 0
-	gameOver = false
-	overlay.Visible = false
-	for r = 1, GRID do
-		grid[r] = {}
-		for c = 1, GRID do grid[r][c] = 0 end
-	end
-	local popSet = {}
-	spawnTile(popSet)
-	spawnTile(popSet)
-	render(popSet)
-	sendSave()
-end
-
-restartButton.Activated:Connect(newGame)
-
--- ========================================================================
--- 6. PERSISTENCE (sunucu kaydi: skor, best, tahta, tema)
--- ========================================================================
-local VALID_TILE = { [0] = true }
-do
-	local v = 2
-	while v <= 131072 do VALID_TILE[v] = true v *= 2 end
-end
-
-local function validBoard(b)
-	if type(b) ~= "table" then return false end
-	local tileCount = 0
-	for r = 1, GRID do
-		if type(b[r]) ~= "table" then return false end
-		for c = 1, GRID do
-			local v = b[r][c]
-			if type(v) ~= "number" or not VALID_TILE[v] then return false end
-			if v > 0 then tileCount += 1 end
-		end
-	end
-	return tileCount > 0
-end
-
-sendSave = function()
-	if not loaded then return end
-	SaveEvent:FireServer({
-		board = grid,
-		score = score,
-		theme = currentTheme,
-	})
-end
-
-local function loadSavedState()
-	local ok, data = pcall(function()
-		return GetData:InvokeServer()
+	task.delay(SLIDE_TIME + 0.02, function()
+		for _, g in ipairs(ghosts) do g:Destroy() end
+		done()
 	end)
+end
 
-	if ok and type(data) == "table" then
-		best = (type(data.best) == "number") and math.max(0, data.best) or 0
-		if data.theme == "Dark" then applyTheme("Dark") end
-
-		if validBoard(data.board) and type(data.score) == "number" and data.score >= 0 then
-			-- Yarim kalan oyunu aynen surdur
-			for r = 1, GRID do
-				grid[r] = {}
-				for c = 1, GRID do grid[r][c] = data.board[r][c] end
+-- 2048+ tile'lari icin dinamik neon hue dongusu
+RunService.Heartbeat:Connect(function()
+	if not S.board then return end
+	local hue = (os.clock() * 0.35) % 1
+	local rainbow = Color3.fromHSV(hue, 0.8, 1)
+	local txt = textColorFor(rainbow)
+	for r = 1, S.size do
+		for c = 1, S.size do
+			if S.board[r] and S.board[r][c] and S.board[r][c] >= 2048 then
+				local tile = cells[r][c].tile
+				if tile.Visible then
+					tile.BackgroundColor3 = rainbow
+					tile.TextColor3 = txt
+				end
 			end
-			score = math.floor(data.score)
-			render(nil)
-			checkGameOver()
-			loaded = true
+		end
+	end
+end)
+
+-- ========================================================================
+-- 7. GAME FLOW
+-- ========================================================================
+local function showOver(earned)
+	overTitle.Text = "Game Over"
+	-- earned nil ise (resync yolu) odul metni gosterilmez; kesin degeri NM_Sync yazar
+	overSub.Text = earned and ("+" .. earned .. " 🪙") or ""
+	primaryButton.Text = "New Game"
+	secondaryButton.Visible = false
+	overlay.Visible = true
+end
+
+local function showWin()
+	overTitle.Text = "2048!"
+	overSub.Text = "You reached 2048, keep going!"
+	primaryButton.Text = "New Game"
+	secondaryButton.Visible = true
+	overlay.Visible = true
+end
+
+-- Sunucudan gelen tam durumu uygula
+local function applyState(state, earned)
+	if type(state) ~= "table" then return end
+	S.coins = state.coins or S.coins
+	S.best = state.best or S.best
+	S.up = state.up or S.up
+	if state.theme and state.theme ~= currentTheme then
+		applyTheme(state.theme)
+	end
+	local run = state.run
+	if run then
+		if run.size ~= S.size then
+			S.size = run.size
+			buildGrid(S.size)
+		end
+		S.board = run.board
+		S.score = run.score
+		S.seed = run.seed
+		S.spawns = run.spawns
+		S.undoLeft = run.undoLeft
+		S.won = run.won
+		S.over = run.over
+	end
+	overlay.Visible = false
+	if S.over then
+		showOver(earned)
+	end
+	render(nil)
+end
+
+local function requestNewGame(size)
+	if not S.loaded or S.busy then return end
+	S.busy = true
+	local req = size and { a = "grid", size = size } or { a = "new" }
+	local res = act(req)
+	if res and res.ok then
+		applyState(res.state)
+	end
+	S.busy = false
+end
+
+local function requestUndo()
+	if not S.loaded or S.busy or S.over or S.undoLeft < 1 then return end
+	S.busy = true
+	local res = act({ a = "undo" })
+	if res and res.ok then
+		applyState(res.state)
+	end
+	S.busy = false
+end
+
+local function doMove(dir)
+	-- overlay.Visible: win ekrani acikken de hamle kilitli (Continue/New Game beklenir)
+	if not S.loaded or S.busy or S.over or S.shopOpen or overlay.Visible then return end
+	local changed, gained, anims, popSet = simMove(S.board, S.size, dir)
+	if not changed then return end
+	S.busy = true
+	S.score = S.score + gained
+	local sr, sc = spawnTile(S.board, S.size, S.seed, S.spawns, S.up.spawn)
+	S.spawns += 1
+	if sr then popSet[sr .. "_" .. sc] = true end
+	MoveEvent:FireServer(dir)
+	if S.undoLeft > 0 then
+		-- sunucuda snapshot olustu; buton aktif kalir
+	end
+	local justWon = false
+	if not S.won and boardMax(S.board, S.size) >= 2048 then
+		S.won = true
+		justWon = true
+	end
+	playSlide(anims, function()
+		render(popSet)
+		if justWon then
+			showWin()
+		end
+		if not hasMoves(S.board, S.size) then
+			S.over = true
+			-- Odul metni lokal formulle aninda gosterilir; coin bakiyesini
+			-- YALNIZCA sunucu gunceller (NM_Sync "over"), cift sayim olmaz
+			local earned = coinsForRun(S.score, boardMax(S.board, S.size), S.up.coin)
+			updateHUD()
+			showOver(earned)
+		end
+		task.delay(MOVE_DEBOUNCE - SLIDE_TIME, function()
+			S.busy = false
+		end)
+	end)
+end
+
+primaryButton.Activated:Connect(function()
+	requestNewGame(nil)
+end)
+
+secondaryButton.Activated:Connect(function()
+	-- 2048 sonrasi devam: overlay kapanir, run surer
+	overlay.Visible = false
+end)
+
+newButton.Activated:Connect(function()
+	requestNewGame(nil)
+end)
+
+undoButton.Activated:Connect(requestUndo)
+
+SyncEvent.OnClientEvent:Connect(function(p)
+	if type(p) ~= "table" then return end
+	if p.ev == "over" then
+		S.coins = p.coins or S.coins
+		S.best = math.max(S.best, p.best or 0)
+		if overlay.Visible and not secondaryButton.Visible then
+			overSub.Text = "+" .. (p.earned or 0) .. " 🪙"
+		end
+		updateHUD()
+	elseif p.ev == "win" then
+		S.coins = p.coins or S.coins
+		S.best = math.max(S.best, p.best or 0)
+		updateHUD()
+	elseif p.ev == "resync" then
+		applyState(p.state)
+	end
+end)
+
+-- ========================================================================
+-- 8. SHOP UI
+-- ========================================================================
+local shopTab = "shop"   -- "shop" | "top"
+
+local function shopRow(height)
+	local t = THEMES[currentTheme]
+	local row = make("Frame", {
+		Size = UDim2.new(1, -6, 0, height),
+		BackgroundColor3 = t.empty,
+		BorderSizePixel = 0,
+		ZIndex = 21,
+	}, shopList)
+	corner(row, TILE_RADIUS)
+	return row, textColorFor(t.empty)
+end
+
+local rebuildShop   -- ileri bildirim (buy butonu icinden cagrilir)
+
+local function buildShopRows()
+	local t = THEMES[currentTheme]
+	for _, item in ipairs(SHOP) do
+		local lv = S.up[item.id]
+		local row, rowText = shopRow(64)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 8),
+			Size = UDim2.new(1, -130, 0, 18),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = item.name .. "  (" .. lv .. "/" .. item.max .. ")",
+			TextColor3 = rowText,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 22,
+		}, row)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 30),
+			Size = UDim2.new(1, -130, 0, 26),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Gotham,
+			Text = item.desc,
+			TextColor3 = rowText,
+			TextTransparency = 0.25,
+			TextSize = 11,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			ZIndex = 22,
+		}, row)
+		local buyButton = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -10, 0.5, 0),
+			Size = UDim2.fromOffset(104, 34),
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			AutoButtonColor = true,
+			BorderSizePixel = 0,
+			ZIndex = 22,
+		}, row)
+		corner(buyButton, TILE_RADIUS)
+		if lv >= item.max then
+			buyButton.Text = "MAX"
+			buyButton.BackgroundColor3 = t.button
+			buyButton.TextColor3 = t.statLabel
+		else
+			local cost = item.costs[lv + 1]
+			buyButton.Text = cost .. " 🪙"
+			if S.coins >= cost then
+				buyButton.BackgroundColor3 = ACCENT
+				buyButton.TextColor3 = WHITE_TEXT
+			else
+				buyButton.BackgroundColor3 = t.button
+				buyButton.TextColor3 = t.statLabel
+			end
+			buyButton.Activated:Connect(function()
+				local res = act({ a = "buy", id = item.id })
+				if res and res.ok then
+					S.coins = res.coins
+					S.up = res.up
+					if item.id == "undo" and not S.over then
+						S.undoLeft += 1
+					end
+					updateHUD()
+					rebuildShop()
+				end
+			end)
+		end
+	end
+
+	-- 5x5 kilidi acildiysa tahta boyutu satiri
+	if S.up.grid5 > 0 then
+		local row, rowText = shopRow(56)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 0),
+			Size = UDim2.new(1, -130, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = "Board Size (new run starts)",
+			TextColor3 = rowText,
+			TextSize = 13,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 22,
+		}, row)
+		local toggle = make("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -10, 0.5, 0),
+			Size = UDim2.fromOffset(104, 34),
+			BackgroundColor3 = ACCENT,
+			Font = Enum.Font.GothamBold,
+			Text = (S.size == 4) and "Play 5x5" or "Play 4x4",
+			TextColor3 = WHITE_TEXT,
+			TextSize = 13,
+			AutoButtonColor = true,
+			BorderSizePixel = 0,
+			ZIndex = 22,
+		}, row)
+		corner(toggle, TILE_RADIUS)
+		toggle.Activated:Connect(function()
+			local target = (S.size == 4) and 5 or 4
+			S.shopOpen = false
+			shopModal.Visible = false
+			requestNewGame(target)
+		end)
+	end
+end
+
+local function buildTopRows()
+	local loadingRow, loadingText = shopRow(40)
+	local label = make("TextLabel", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = "Loading...",
+		TextColor3 = loadingText,
+		TextSize = 14,
+		ZIndex = 22,
+	}, loadingRow)
+	task.spawn(function()
+		local res = act({ a = "top" })
+		if not shopModal.Visible or shopTab ~= "top" then return end
+		loadingRow:Destroy()
+		local list = (res and res.ok and res.list) or {}
+		if #list == 0 then
+			local row, rowText = shopRow(40)
+			make("TextLabel", {
+				Size = UDim2.fromScale(1, 1),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = "No scores yet",
+				TextColor3 = rowText,
+				TextSize = 14,
+				ZIndex = 22,
+			}, row)
 			return
 		end
-	end
-
-	-- Kayit yok veya bozuk: temiz baslangic (best korunur)
-	loaded = true
-	newGame()
+		for rank, entry in ipairs(list) do
+			local row, rowText = shopRow(38)
+			make("TextLabel", {
+				Position = UDim2.fromOffset(10, 0),
+				Size = UDim2.new(0.65, 0, 1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = rank .. ". " .. entry.name,
+				TextColor3 = rowText,
+				TextSize = 13,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 22,
+			}, row)
+			make("TextLabel", {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -10, 0, 0),
+				Size = UDim2.new(0.3, 0, 1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBlack,
+				Text = tostring(entry.score),
+				TextColor3 = rowText,
+				TextSize = 13,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				ZIndex = 22,
+			}, row)
+		end
+	end)
 end
 
+rebuildShop = function()
+	for _, child in ipairs(shopList:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	local t = THEMES[currentTheme]
+	local activeTab = (shopTab == "shop") and shopTabButton or topTabButton
+	local idleTab = (shopTab == "shop") and topTabButton or shopTabButton
+	activeTab.BackgroundColor3 = ACCENT
+	activeTab.TextColor3 = WHITE_TEXT
+	idleTab.BackgroundColor3 = t.button
+	idleTab.TextColor3 = t.buttonText
+	if shopTab == "shop" then
+		buildShopRows()
+	else
+		buildTopRows()
+	end
+end
+
+shopButton.Activated:Connect(function()
+	if not S.loaded then return end
+	S.shopOpen = not S.shopOpen
+	shopModal.Visible = S.shopOpen
+	if S.shopOpen then
+		shopTab = "shop"
+		rebuildShop()
+	end
+end)
+
+shopTabButton.Activated:Connect(function()
+	shopTab = "shop"
+	rebuildShop()
+end)
+
+topTabButton.Activated:Connect(function()
+	shopTab = "top"
+	rebuildShop()
+end)
+
+closeButton.Activated:Connect(function()
+	S.shopOpen = false
+	shopModal.Visible = false
+end)
+
 -- ========================================================================
--- 7. INPUT (WASD + ok tuslari, debounce)
+-- 9. INPUT (klavye + mobil swipe)
 -- ========================================================================
 local KEY_MAP = {
 	[Enum.KeyCode.W] = "Up",    [Enum.KeyCode.Up] = "Up",
@@ -553,41 +1121,42 @@ local KEY_MAP = {
 	[Enum.KeyCode.D] = "Right", [Enum.KeyCode.Right] = "Right",
 }
 
-local busy = false
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or busy or gameOver or not loaded then return end
+	if gameProcessed then return end
 	local direction = KEY_MAP[input.KeyCode]
-	if not direction then return end
-	busy = true
-	move(direction)
-	task.delay(MOVE_DEBOUNCE, function() busy = false end)
+	if direction then doMove(direction) end
 end)
 
--- ========================================================================
--- 8. ANIM: 2048+ tile'lari icin dinamik neon hue dongusu
--- ========================================================================
-RunService.Heartbeat:Connect(function()
-	local hue = (os.clock() * 0.35) % 1
-	local rainbow = Color3.fromHSV(hue, 0.8, 1)
-	local txt = textColorFor(rainbow)
-	for r = 1, GRID do
-		for c = 1, GRID do
-			if grid[r] and grid[r][c] and grid[r][c] >= 2048 then
-				local tile = cells[r][c].tile
-				tile.BackgroundColor3 = rainbow
-				tile.TextColor3 = txt
-			end
-		end
-	end
+local SWIPE_MAP = {
+	[Enum.SwipeDirection.Up] = "Up",
+	[Enum.SwipeDirection.Down] = "Down",
+	[Enum.SwipeDirection.Left] = "Left",
+	[Enum.SwipeDirection.Right] = "Right",
+}
+
+UserInputService.TouchSwipe:Connect(function(swipeDir, _, gameProcessed)
+	if gameProcessed then return end
+	local direction = SWIPE_MAP[swipeDir]
+	if direction then doMove(direction) end
 end)
 
 -- ========================================================================
 -- BASLAT
 -- ========================================================================
-math.randomseed(os.clock() * 1e6)
-for r = 1, GRID do
-	grid[r] = {}
-	for c = 1, GRID do grid[r][c] = 0 end
-end
 applyTheme("Light")
-loadSavedState()   -- yields: sunucudan kayit gelene kadar bekler, sonra oyun baslar
+updateHUD()
+
+task.spawn(function()
+	-- Sunucu kaydi yukleyene kadar dene; notReady geldikce bekle
+	while not S.loaded do
+		local ok, state = pcall(function()
+			return GetData:InvokeServer()
+		end)
+		if ok and type(state) == "table" and not state.notReady then
+			applyState(state)
+			S.loaded = true
+		else
+			task.wait(2)
+		end
+	end
+end)

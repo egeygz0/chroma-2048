@@ -1,11 +1,43 @@
-# Neon Merge 2048 v2 — Kurulum ve Rehber
+# Neon Merge 2048 v3 — Kurulum ve Rehber
 
 ## Kurulum
 
 1. Roblox Studio'da yerini aç (Baseplate yeterli).
 2. **StarterPlayer > StarterPlayerScripts** içine bir **LocalScript** ekle, içeriğini `MainGame.client.lua` ile tamamen değiştir.
-3. **ServerScriptService** içine bir **Script** ekle, içeriğini `Server.server.lua` ile değiştir (kayıt sistemi burada; bu betik olmadan istemci `NM_GetData` beklerken takılır).
+3. **ServerScriptService** içine bir **Script** ekle, içeriğini `Server.server.lua` ile değiştir (oyun otoritesi ve kayıt burada; bu betik olmadan istemci `NM_GetData` beklerken takılır).
 4. **Play** (F5).
+
+## v3'te Yeni: SUNUCU-OTORİTER ÇEKİRDEK + COIN EKONOMİSİ
+
+- **Oyun mantığı artık sunucuda simüle edilir.** İstemci yalnızca hamle yönü gönderir (`NM_Move`); slide/merge/spawn/skor/coin sunucuda işlenir. İstemci aynı simülasyonu görsel için lokal oynatır; spawn deterministiktir (`Random.new(seed + spawnIndex * 7919)`), iki taraf aynı seed ve sayaçla aynı sonucu üretir. Exploiter'ın skor/coin beyan etme yolu yoktur.
+- **Coin sistemi:** tur bitince (game over veya elle yeni oyun) `coin = floor(skor/100) + en yüksek tile bonusu` (256:+10, 512:+25, 1024:+60, 2048:+150, 4096:+400), Coin Rush çarpanıyla ölçeklenir. Ödülü sunucu hesaplar.
+- **Mağaza (SHOP butonu):**
+
+| Upgrade | Maks | Fiyatlar | Etki |
+|---|---|---|---|
+| Lucky Spawns | 5 | 50/100/200/400/800 | 4 gelme şansı +%10/sv; sv4+ 8 şansı (%5/sv) |
+| Head Start | 3 | 150/400/1000 | Her tur 8/16/32'lik hazır tile ile başlar |
+| Undo | 3 | 100/300/700 | Tur başına +1 geri alma hakkı |
+| Coin Rush | 4 | 200/500/1200/2500 | Coin kazancı +%25/sv |
+| 5x5 Board | 1 | 3000 | 5x5 tahta kilidi; mağazadan 4x4/5x5 geçişi (geçiş yeni tur başlatır) |
+
+- **Undo:** UNDO butonu (hak varsa görünür), son hamleyi sunucudan geri alır (tek adım, spawn dahil).
+- **Mobil destek:** dokunmatik swipe ile oynanır (`TouchSwipe`).
+- **Kayma animasyonu:** tile'lar ghost kopyalarla hedefe kayar (0.09 sn), merge/spawn'da pop.
+- **2048 kutlaması:** ilk 2048'de "2048!" ekranı, Continue ile devam / New Game.
+- **Global leaderboard:** OrderedDataStore top 10 (SHOP > TOP 10 sekmesi, sunucuda 60 sn önbellek).
+- **NEW butonu:** turu istediğin an bitirir; skorun coin'e çevrilir, yeni tur başlar.
+
+## Protokol (v3)
+
+| Remote | Tür | Yön | İş |
+|---|---|---|---|
+| `NM_GetData` | RemoteFunction | C→S | Giriş: tam durum (coins, best, tema, upgrade'ler, run) |
+| `NM_Move` | RemoteEvent | C→S | Hamle yönü; sunucu simüle eder |
+| `NM_Act` | RemoteFunction | C→S | `new` / `grid` / `undo` / `buy` / `theme` / `top` |
+| `NM_Sync` | RemoteEvent | S→C | `over` (coin ödülü) / `win` / `resync` (uyumsuzlukta tam durum) |
+
+`CORE SIM` bloğu iki dosyada birebir aynıdır; birinde değiştirirsen diğerinde de değiştir, yoksa görsel ile sunucu durumu ayrışır.
 
 ## Kayıt Sistemi (Database) Nasıl Çalışır?
 
@@ -14,27 +46,21 @@ Roblox'ta "database" = **DataStoreService**. Kurulumu:
 1. **File > Publish to Roblox** ile oyunu yayınla (yayınlanmamış yerlerde DataStore çalışmaz).
 2. **Home > Game Settings > Security > "Enable Studio Access to API Services"** seçeneğini aç (Studio'da test ederken kayıt için şart).
 
-Akış:
-
-- Oyuncu girince sunucu kaydı yükler; istemci `NM_GetData` (RemoteFunction) ile çeker. Kayıtta yarım kalmış geçerli bir tahta varsa oyun **kaldığı yerden** devam eder; yoksa temiz başlar (en iyi skor her durumda korunur).
-- İstemci her hamlede, restart'ta ve tema değişiminde durumunu `NM_Save` (RemoteEvent) ile gönderir. Sunucu gelen veriyi **doğrular** (tahta 4x4 ve tüm değerler 2'nin kuvveti, skor 4M tavanlı, tema yalnızca Light/Dark) ve bellekte tutar; en iyi skoru sunucu hesaplar.
-- DataStore yazımı: her **30 saniyede bir** (veri değiştiyse), **çıkışta** ve **sunucu kapanışında zorla** (`UpdateAsync` + 3 deneme; oyuncu başına yazımlar arası en az 6 sn).
-- İlk yükleme bitmeden istemci hiçbir kayıt göndermez (boş durumun eski kaydın üstüne yazma riski kapalı).
-
-Kayıt anahtarı: `NeonMerge2048Save_v1` / `u_<UserId>`. Kayıt yapısını bozacak bir değişiklik yaparsan `_v2` yap ki eski kayıtlar yanlış yüklenmesin.
-
-Kaydedilen alanlar: `board` (4x4 tahta veya nil), `score`, `best`, `theme`.
+- Kayıt tamamen sunucudadır: her **30 saniyede bir** (değiştiyse), **çıkışta** ve **kapanışta zorla** (`UpdateAsync` + 3 deneme, oyuncu başına en az 6 sn aralık).
+- Kayıt anahtarı: `NeonMerge2048Save_v1` / `u_<UserId>`, `schema=2`. v2 dönemi eski kayıtlar (düz board/score/best/theme) otomatik migrate edilir. Yapıyı bozacak değişiklikte `_v2`/`schema=3` yap.
+- Kaydedilen: `coins`, `best`, `theme`, `up` (upgrade seviyeleri), `run` (board, score, seed, spawns, size, undoLeft, won, over). Yarım kalan tur girişte aynen devam eder.
+- Leaderboard: OrderedDataStore `NeonMerge2048Top_v1`, değer = best; tur sonunda ve çıkışta best arttıysa yazılır.
 
 ## Oynanış ve Kontroller
 
 | Girdi | İşlev |
 |---|---|
-| W / Yukarı ok | Yukarı kaydır |
-| S / Aşağı ok | Aşağı kaydır |
-| A / Sol ok | Sola kaydır |
-| D / Sağ ok | Sağa kaydır |
-| 🌙 / ☀️ butonu | Light ↔ Dark tema (tercih kaydedilir) |
-| Restart butonu | Oyun bittiğinde yeni oyun (best korunur) |
+| W/A/S/D veya ok tuşları | Kaydır |
+| Swipe (mobil) | Kaydır |
+| UNDO | Son hamleyi geri al (hak varsa) |
+| NEW | Turu bitir (coin kazan), yeni tur |
+| SHOP | Mağaza + TOP 10 |
+| 🌙 / ☀️ | Light ↔ Dark tema (kaydedilir) |
 
 ## Temalar
 
@@ -44,24 +70,14 @@ Kaydedilen alanlar: `board` (4x4 tahta veya nil), `score`, `best`, `theme`.
 | Oyun kutusu | `#FFFFFF` | `#2A2A2A` |
 | Boş hücreler | `#E0E0E0` | `#EAE6DF` |
 
-Tema geçişleri TweenService ile 0.35 sn'de yumuşak yapılır.
-
 ## Tile Paleti
 
-2→`#FFD700`, 4→`#FF8C00`, 8→`#FF4500`, 16→`#FF1493`, 32→`#00E676`, 64→`#00E5FF`, 128→`#2979FF`, 256→`#AA00FF`, 512→`#F50057`, 1024→`#FFAB00`, 2048+→dinamik neon hue döngüsü (Heartbeat). Metin rengi parlaklığa göre otomatik seçilir (koyu gri / beyaz).
+2→`#FFD700`, 4→`#FF8C00`, 8→`#FF4500`, 16→`#FF1493`, 32→`#00E676`, 64→`#00E5FF`, 128→`#2979FF`, 256→`#AA00FF`, 512→`#F50057`, 1024→`#FFAB00`, 2048+→dinamik neon hue döngüsü. Metin rengi parlaklığa göre otomatik.
 
-## Mimari Notlar
+## v2
 
-- **Tek dosya istemci**: UI (UICorner'lı board + hücreler + header + game-over katmanı), tema yöneticisi, oyun çekirdeği (4x4 matris, slide/merge/spawn), giriş (debounce'lu WASD + ok) ve animasyonlar (UIScale pop-in 0.8 → 1.05 → 1.0) tek LocalScript'te bölümlenmiş durumda.
-- **Sunucu yalnızca kayıt otoritesi**: oyun mantığı istemcide çalışır (tek kişilik puzzle, rekabetçi ekonomi yok); sunucu gelen veriyi şema ve tavan kontrolünden geçirir. Global leaderboard eklenecekse skor üretimi sunucuya taşınmalı.
-- İstemci ve sunucu betiği protokol üzerinden bağlıdır (`NM_GetData`, `NM_Save`); güncellerken **ikisini birlikte** değiştir.
-
-## v2'de Yeni
-
-- **Kalıcı kayıt (DataStore)**: skor, en iyi skor, yarım kalan tahta ve tema tercihi oturumlar arası taşınır; çıkıp giren oyuncu sıfırdan başlamaz.
-- Header'a **SCORE / BEST** kutuları eklendi.
-- Sunucu betiği eklendi: doğrulama, otomatik kayıt (30 sn), çıkış/kapanış kaydı.
+- Kalıcı kayıt (DataStore), SCORE/BEST kutuları, sunucu doğrulamalı kayıt.
 
 ## v1
 
-- Programatik UI, light/dark tema, canlı tile paleti, pop-in animasyonları, WASD + ok kontrolleri, game-over + restart.
+- Programatik UI, light/dark tema, canlı tile paleti, pop-in animasyonları, WASD + ok, game-over + restart.
