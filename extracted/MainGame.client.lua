@@ -24,6 +24,8 @@ local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ReplicatedFirst   = game:GetService("ReplicatedFirst")
 local MarketplaceService = game:GetService("MarketplaceService")
+local ContentProvider    = game:GetService("ContentProvider")
+local Debris             = game:GetService("Debris")
 
 -- ========================================================================
 -- MONETIZASYON ID'leri: Server.server.lua ile BIREBIR ayni olmali.
@@ -204,7 +206,8 @@ local SOUND_LABELS = {
 local soundVolume = 70      -- 0-100, sunucudan yuklenir
 local soundMuted = false
 local soundOff = {}         -- kapatilmis ses anahtarlari (ayarlardan)
-local sounds = {}
+local sounds = {}           -- [ad] = sablon Sound (calinmaz, klonlanir)
+local soundFolder = nil     -- sablonlarin ve calan kopyalarin kabi
 
 local function effectiveVolume()
 	if soundMuted then return 0 end
@@ -213,29 +216,51 @@ end
 
 local function applySoundVolume()
 	local vol = effectiveVolume()
-	for _, s in pairs(sounds) do
-		s.Volume = vol
+	if not soundFolder then return end
+	-- Sablonlar ve o an calan kopyalar birlikte guncellenir (mute aninda etki eder)
+	for _, child in ipairs(soundFolder:GetChildren()) do
+		if child:IsA("Sound") then child.Volume = vol end
 	end
 end
 
 local function initSounds(parent)
+	soundFolder = Instance.new("Folder")
+	soundFolder.Name = "SFX"
+	soundFolder.Parent = parent
+
 	local vol = effectiveVolume()
+	local preload = {}
 	for name, id in pairs(SOUND_IDS) do
 		if id ~= 0 then
 			local s = Instance.new("Sound")
 			s.Name = "SFX_" .. name
 			s.SoundId = "rbxassetid://" .. id
 			s.Volume = vol
-			s.Parent = parent
+			s.Parent = soundFolder
 			sounds[name] = s
+			table.insert(preload, s)
 		end
+	end
+	-- Onbellege al: yuklenmemis ses ilk tetiklemelerde sessiz kalir
+	if #preload > 0 then
+		task.spawn(function()
+			pcall(function() ContentProvider:PreloadAsync(preload) end)
+		end)
 	end
 end
 
+-- Her tetiklemede sablonun kopyasi calinir. Tek Sound'u tekrar tekrar Play()
+-- etmek arka arkaya hamlelerde sesi bastan baslatip duyulmaz hale getiriyordu.
 local function playSound(name)
 	if soundMuted or soundVolume <= 0 or soundOff[name] then return end
-	local s = sounds[name]
-	if s then s:Play() end
+	local template = sounds[name]
+	if not template or not soundFolder then return end
+	local s = template:Clone()
+	s.Volume = effectiveVolume()
+	s.Parent = soundFolder
+	s:Play()
+	s.Ended:Once(function() s:Destroy() end)
+	Debris:AddItem(s, 6)   -- Ended gelmezse (yuklenemeyen ses) sizinti olmasin
 end
 
 local function tileBonus(maxTile)
@@ -1872,7 +1897,9 @@ local function doMove(dir)
 	S.spawns += 1
 	if sr then popSet[sr .. "_" .. sc] = true end
 	queueMove(dir)
-	playSound((gained > 0) and "merge" or "move")
+	-- Kaydirma sesi her gecerli hamlede calar; birlestirme varsa uzerine merge eklenir
+	playSound("move")
+	if gained > 0 then playSound("merge") end
 
 	-- 512+ birlestirmede tahta sarsilir (anims'te merged girisleri birlesme oncesi degeri tutar)
 	local maxMerge = 0
