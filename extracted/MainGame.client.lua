@@ -22,9 +22,15 @@ local TweenService      = game:GetService("TweenService")
 local UserInputService  = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ReplicatedFirst   = game:GetService("ReplicatedFirst")
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- 3D dunya yuklenmesini bekleyen varsayilan yukleme ekrani gereksiz: oyun 2D
+pcall(function()
+	ReplicatedFirst:RemoveDefaultLoadingScreen()
+end)
 
 -- 3D dunya kapali: kamera Scriptable kilitlenir, bos gokyuzune bakar;
 -- oyun tamamen ScreenGui uzerinde calisir
@@ -532,6 +538,39 @@ end
 
 buildGrid(4)
 
+-- Yukleme katmani: sunucudan kayit gelene kadar tahtanin ustunde durur.
+-- Kayit gecikirse oyuncu bos tahtaya degil, durum mesajina bakar.
+local loadingLayer = make("Frame", {
+	Name = "LoadingLayer",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.fromRGB(15, 15, 15),
+	BackgroundTransparency = 0.25,
+	ZIndex = 15,
+}, board)
+corner(loadingLayer, BOARD_RADIUS)
+
+local loadingText = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromScale(0.85, 0.25),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Loading...",
+	TextColor3 = WHITE_TEXT,
+	TextScaled = true,
+	ZIndex = 16,
+}, loadingLayer)
+make("UITextSizeConstraint", { MaxTextSize = 22 }, loadingText)
+
+local function setLoading(text)
+	loadingText.Text = text
+	loadingLayer.Visible = true
+end
+
+local function hideLoading()
+	loadingLayer.Visible = false
+end
+
 -- Game over / win katmani
 local overlay = make("Frame", {
 	Name = "RunOverlay",
@@ -755,6 +794,7 @@ local function applyTheme(name)
 end
 
 themeButton.Activated:Connect(function()
+	if not S.loaded then return end   -- yukleme bitmeden secim sunucuda kaydedilemez
 	applyTheme(currentTheme == "Light" and "Dark" or "Light")
 	task.spawn(act, { a = "theme", t = currentTheme })
 end)
@@ -1154,28 +1194,28 @@ local function buildShopRows()
 end
 
 local function buildTopRows()
-	local loadingRow, loadingText = shopRow(40)
+	local loadingRow, loadingRowText = shopRow(40)
 	make("TextLabel", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
 		Text = "Loading...",
-		TextColor3 = loadingText,
+		TextColor3 = loadingRowText,
 		TextSize = 14,
 		ZIndex = 22,
 	}, loadingRow)
 	topRefreshToken += 1
 	local token = topRefreshToken
-	local board = topBoard
+	local boardKind = topBoard   -- dis kapsamdaki `board` Frame'ini golgelememek icin
 	task.spawn(function()
-		local res = act({ a = "top", board = board })
+		local res = act({ a = "top", board = boardKind })
 		if not shopModal.Visible or shopTab ~= "top" or token ~= topRefreshToken then return end
 		loadingRow:Destroy()
 		local t = THEMES[currentTheme]
 		local list = (res and res.ok and res.list) or {}
 
 		-- Tek metrik: SCORE sekmesinde yalnizca skor, BLOCK sekmesinde yalnizca en yuksek blok
-		local isTileBoard = (board == "tile")
+		local isTileBoard = (boardKind == "tile")
 		local metricText = isTileBoard and "BLOCK" or "SCORE"
 
 		local head = make("Frame", {
@@ -1380,7 +1420,9 @@ applyTheme("Light")
 updateHUD()
 
 task.spawn(function()
-	-- Sunucu kaydi yukleyene kadar dene; notReady geldikce bekle
+	-- Sunucu kaydi yukleyene kadar dene; notReady geldikce tekrarla.
+	-- Bekleme suresince oyuncu bos tahtaya degil, durum mesajina bakar.
+	local startedAt = os.clock()
 	while not S.loaded do
 		local ok, state = pcall(function()
 			return GetData:InvokeServer()
@@ -1388,8 +1430,12 @@ task.spawn(function()
 		if ok and type(state) == "table" and not state.notReady then
 			applyState(state)
 			S.loaded = true
+			hideLoading()
 		else
-			task.wait(2)
+			if os.clock() - startedAt >= 4 then
+				setLoading("Save server unavailable\nRetrying...")
+			end
+			task.wait(0.5)
 		end
 	end
 end)

@@ -1,4 +1,10 @@
-# Neon Merge 2048 v3.2 — Kurulum ve Rehber
+# Neon Merge 2048 v3.3 — Kurulum ve Rehber
+
+## v3.3'te Yeni: Veri Kaybı Koruması + Hızlı Açılış
+
+- **Kritik düzeltme, DataStore hatasında veri kaybı:** Önceden `GetAsync` başarısız olursa (`502 / InternalServerError`) sunucu oyuncuyu sıfırdan başlamış sayıyor, sonra otomatik kayıt bu boş veriyi **gerçek kaydın üstüne yazıyordu**. Artık yükleme başarısızsa oturum "yüklendi" sayılmaz: o oyuncu için **hiçbir yazma yapılmaz**, arka planda kademeli aralıklarla (5/10/20/30 sn) tekrar denenir, erişim gelince kaldığı yerden devam eder.
+- **Hızlı açılış:** yükleme denemeleri 1/2/3 sn yerine 0.2/1 sn ile başlar, sunucu bekleme süresi 15 sn'den 3 sn'ye indi (istemci zaten yeniden deniyor), Roblox'un varsayılan yükleme ekranı kaldırılır (3D dünya beklenmez).
+- **Görünür yükleme durumu:** kayıt gelene kadar tahtanın üstünde "Loading..." katmanı; 4 saniyeyi geçerse "Save server unavailable / Retrying..." yazar. Oyuncu boş tahtaya bakıp donmuş sanmaz.
 
 ## v3.2'de Yeni: Zengin Leaderboard + Kayıt Sağlık Kontrolü
 

@@ -43,14 +43,22 @@ Players.CharacterAutoLoads = false
 
 -- DataStore saglik kontrolu: erisim yoksa kayit calismaz, aciktan uyar
 task.spawn(function()
-	local ok, err = pcall(function()
-		store:GetAsync("__health_check")
-	end)
-	if not ok then
-		warn("[NeonMerge2048] !!! DATASTORE ERISILEMIYOR - KAYIT CALISMAYACAK !!!")
-		warn("[NeonMerge2048] Cozum: 1) File > Publish to Roblox ile oyunu yayinla,")
+	local ok, err
+	for attempt = 1, 3 do
+		ok, err = pcall(function()
+			store:GetAsync("__health_check")
+		end)
+		if ok then return end
+		task.wait(attempt)
+	end
+	local msg = tostring(err)
+	warn("[NeonMerge2048] !!! DATASTORE ERISILEMIYOR !!! Hata: " .. msg)
+	if msg:find("403") or msg:find("not allowed") or msg:find("publish") then
+		warn("[NeonMerge2048] Sebep izin: 1) File > Publish to Roblox ile oyunu yayinla,")
 		warn("[NeonMerge2048] 2) Game Settings > Security > 'Enable Studio Access to API Services' ac.")
-		warn("[NeonMerge2048] Hata: " .. tostring(err))
+	else
+		warn("[NeonMerge2048] Sebep Roblox tarafinda gecici olabilir (500/502). Kayit yazma otomatik")
+		warn("[NeonMerge2048] durdurulur, veri kaybi olmaz; erisim gelince kaldigi yerden devam eder.")
 	end
 end)
 
@@ -386,6 +394,7 @@ local function endRun(session, run)
 end
 
 local function pushBestToTop(playerObj, session)
+	if not session.loaded or not session.data then return end
 	local data = session.data
 	if data.best > (session.topWritten or 0) then
 		session.topWritten = data.best
@@ -400,8 +409,13 @@ end
 -- ========================================================================
 -- DataStore yukle / yaz
 -- ========================================================================
+-- Basarili olursa veri dondurur, TUM denemeler basarisizsa nil.
+-- nil dondugunde oturum "yuklendi" sayilmaz ve HICBIR yazma yapilmaz:
+-- boylece gecici DataStore hatasi (502) mevcut kaydin uzerine bos veri yazamaz.
+local LOAD_BACKOFF = { 0.2, 1 }   -- tur basina 2 deneme; ustu arka plan dongusune birakilir
+
 local function loadData(userId)
-	for attempt = 1, 3 do
+	for attempt = 1, #LOAD_BACKOFF do
 		local ok, result = pcall(function()
 			return store:GetAsync(keyFor(userId))
 		end)
@@ -455,9 +469,9 @@ local function loadData(userId)
 			return data
 		end
 		warn(("[NeonMerge2048] Yukleme denemesi %d basarisiz (%s): %s"):format(attempt, userId, tostring(result)))
-		task.wait(attempt)
+		task.wait(LOAD_BACKOFF[attempt])
 	end
-	return defaultData()
+	return nil   -- veri kaybini onlemek icin varsayilan veriyle DEVAM ETME
 end
 
 local function serializeData(data)
@@ -525,6 +539,7 @@ SyncEvent.Parent = ReplicatedStorage
 -- Oyuncu akisi
 -- ========================================================================
 local function onPlayerAdded(playerObj)
+	if sessions[playerObj] then return end   -- PlayerAdded + GetPlayers() cift tetiklemesi
 	-- CharacterAutoSpawn kapali olsa da baska bir betik LoadCharacter cagirirsa
 	-- karakteri aninda kaldir; 3D dunyada avatar asla gorunmez
 	playerObj.CharacterAdded:Connect(function(character)
@@ -538,10 +553,29 @@ local function onPlayerAdded(playerObj)
 
 	local session = { data = nil, loaded = false, dirty = false, lastWrite = 0, topWritten = 0, tileWritten = 0 }
 	sessions[playerObj] = session
-	session.data = loadData(playerObj.UserId)
-	session.topWritten = session.data.best
-	session.tileWritten = session.data.bestTile
-	session.loaded = true
+
+	-- Yukleme basarisiz oldukca arka planda denemeye devam eder; basarana kadar
+	-- oturum "yuklenmis" sayilmaz, dolayisiyla hicbir kayit yazilmaz.
+	-- Turlar arasi bekleme kademeli buyur: kesinti sirasinda GetAsync butcesini
+	-- tuketip kurtarmayi geciktirmemek icin.
+	task.spawn(function()
+		local RETRY_WAITS = { 5, 10, 20, 30 }
+		local round = 0
+		while sessions[playerObj] == session do
+			local data = loadData(playerObj.UserId)
+			if data then
+				session.data = data
+				session.topWritten = data.best
+				session.tileWritten = data.bestTile
+				session.loaded = true
+				return
+			end
+			round += 1
+			local wait = RETRY_WAITS[math.min(round, #RETRY_WAITS)]
+			warn(("[NeonMerge2048] %s icin kayit yuklenemedi, %d sn sonra tekrar denenecek (bu sure boyunca kayit YAZILMAZ)"):format(playerObj.Name, wait))
+			task.wait(wait)
+		end
+	end)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
@@ -549,9 +583,10 @@ for _, p in ipairs(Players:GetPlayers()) do
 	task.spawn(onPlayerAdded, p)
 end
 
+-- Kisa deadline: yukleme uzarsa istemciye notReady dondurulur, istemci yeniden dener
 local function waitSession(playerObj)
 	local session = sessions[playerObj]
-	local deadline = os.clock() + 15
+	local deadline = os.clock() + 3
 	while (not session or not session.loaded) and os.clock() < deadline do
 		task.wait(0.1)
 		session = sessions[playerObj]
