@@ -31,12 +31,12 @@ local Debris             = game:GetService("Debris")
 -- MONETIZASYON ID'leri: Server.server.lua ile BIREBIR ayni olmali.
 -- 0 birakilan urun magazada gorunmez.
 -- ========================================================================
-local GAMEPASS_2X_COINS    = 0
-local PRODUCT_COINS_1K     = 0
-local PRODUCT_COINS_5K     = 0
-local PRODUCT_COINS_15K    = 0
-local PRODUCT_THEME_NEON   = 0
-local PRODUCT_THEME_SUNSET = 0
+local GAMEPASS_2X_COINS    = 1921208641
+local PRODUCT_COINS_1K     = 3611041230
+local PRODUCT_COINS_5K     = 3611041323
+local PRODUCT_COINS_15K    = 3611041446
+local PRODUCT_THEME_NEON   = 3611041669
+local PRODUCT_THEME_SUNSET = 3611041725
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")

@@ -30,12 +30,12 @@ local MarketplaceService  = game:GetService("MarketplaceService")
 -- 0 birakilan urun satilamaz, oyun normal calisir.
 -- Ayni ID'ler MainGame.client.lua icinde de tanimli, ikisini birlikte guncelle.
 -- ========================================================================
-local GAMEPASS_2X_COINS    = 0   -- kalici: tur sonu coin odulu 2 kat
-local PRODUCT_COINS_1K     = 0   -- tekrar alinabilir: +1.000 coin
-local PRODUCT_COINS_5K     = 0   -- tekrar alinabilir: +5.000 coin
-local PRODUCT_COINS_15K    = 0   -- tekrar alinabilir: +15.000 coin
-local PRODUCT_THEME_NEON   = 0   -- Neon temasini Robux ile ac
-local PRODUCT_THEME_SUNSET = 0   -- Sunset temasini Robux ile ac
+local GAMEPASS_2X_COINS    = 1921208641   -- kalici: tur sonu coin odulu 2 kat
+local PRODUCT_COINS_1K     = 3611041230   -- tekrar alinabilir: +1.000 coin
+local PRODUCT_COINS_5K     = 3611041323   -- tekrar alinabilir: +5.000 coin
+local PRODUCT_COINS_15K    = 3611041446   -- tekrar alinabilir: +15.000 coin
+local PRODUCT_THEME_NEON   = 3611041669   -- Neon temasini Robux ile ac
+local PRODUCT_THEME_SUNSET = 3611041725   -- Sunset temasini Robux ile ac
 
 local SERVER_ACT_DEBOUNCE = 0.15   -- NM_Act istekleri arasi asgari sure
 
