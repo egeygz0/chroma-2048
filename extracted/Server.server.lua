@@ -315,6 +315,8 @@ local function defaultData()
 		daily = { day = 0, streak = 0 },
 		receipts = {},   -- islenmis PurchaseId listesi (cift islemeyi onler)
 		paid = {},       -- Robux ile alinmis kalici kilitler (wipe sonrasi geri verilir)
+		sfx = 70,        -- ses seviyesi yuzdesi (0-100)
+		muted = false,   -- sessize alma (seviye korunur)
 		run = nil,
 	}
 end
@@ -409,6 +411,8 @@ local function publicState(data)
 		dailyStreak = data.daily.streak,
 		dailyContinues = (data.daily.day == dayNumber() - 1),   -- seri kopmus mu
 		vip = data.vip == true,   -- 2x Coins gamepass (oturumdan kopyalanir)
+		sfx = data.sfx,
+		muted = data.muted,
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
@@ -529,6 +533,8 @@ local function loadData(userId)
 					data.daily    = sanitizeDaily(result.daily)
 					data.receipts = sanitizeReceipts(result.receipts)
 					data.paid     = sanitizePaid(result.paid)
+					data.sfx      = math.clamp(sanitizeNumber(result.sfx, 100) or 70, 0, 100)
+					data.muted    = result.muted == true
 					data.theme = (type(result.theme) == "string" and themeAllowed(data, result.theme))
 						and result.theme or "Light"
 					local run = result.run
@@ -594,6 +600,8 @@ local function serializeData(data)
 		daily = deepCopy(data.daily),
 		receipts = deepCopy(data.receipts),
 		paid = deepCopy(data.paid),
+		sfx = data.sfx,
+		muted = data.muted,
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
@@ -992,6 +1000,17 @@ Act.OnServerInvoke = function(playerObj, req)
 		end
 		return { ok = false, err = "bad_theme" }
 
+	elseif a == "sfx" then
+		-- Ses tercihi: kaydirici birakildiginda tek istek gelir
+		if type(req.vol) == "number" and req.vol == req.vol then
+			data.sfx = math.clamp(math.floor(req.vol), 0, 100)
+		end
+		if type(req.muted) == "boolean" then
+			data.muted = req.muted
+		end
+		session.dirty = true
+		return { ok = true }
+
 	elseif a == "daily" then
 		local today = dayNumber()
 		if data.daily.day >= today then
@@ -1016,6 +1035,9 @@ Act.OnServerInvoke = function(playerObj, req)
 		for id in pairs(newData.paid) do
 			newData.up[id] = 1
 		end
+		-- Ses tercihi ilerleme degil, sifirlamada korunur
+		newData.sfx = data.sfx
+		newData.muted = data.muted
 		session.data = newData
 		newData.run = startRun(newData, 4)
 		session.dirty = true

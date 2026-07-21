@@ -186,16 +186,34 @@ local SOUND_IDS = {
 	milestone= 0,   -- 2048 / 4096 / 8192 kutlamasi
 	daily    = 0,   -- gunluk odul
 }
-local SOUND_VOLUME = 0.5
+local SOUND_VOLUME = 0.5   -- %100 seviyedeki tavan ses siddeti
 
+-- Ses tercihi tek noktadan yonetilir: master seviye + sessize alma.
+-- Ses basina ayri anahtar yerine bu yontem tercih edildi (standart oyun UX'i).
+local soundVolume = 70      -- 0-100, sunucudan yuklenir
+local soundMuted = false
 local sounds = {}
+
+local function effectiveVolume()
+	if soundMuted then return 0 end
+	return SOUND_VOLUME * (soundVolume / 100)
+end
+
+local function applySoundVolume()
+	local vol = effectiveVolume()
+	for _, s in pairs(sounds) do
+		s.Volume = vol
+	end
+end
+
 local function initSounds(parent)
+	local vol = effectiveVolume()
 	for name, id in pairs(SOUND_IDS) do
 		if id ~= 0 then
 			local s = Instance.new("Sound")
 			s.Name = "SFX_" .. name
 			s.SoundId = "rbxassetid://" .. id
-			s.Volume = SOUND_VOLUME
+			s.Volume = vol
 			s.Parent = parent
 			sounds[name] = s
 		end
@@ -203,6 +221,7 @@ local function initSounds(parent)
 end
 
 local function playSound(name)
+	if soundMuted or soundVolume <= 0 then return end
 	local s = sounds[name]
 	if s then s:Play() end
 end
@@ -907,6 +926,7 @@ local shopModal = make("Frame", {
 	Name = "ShopModal",
 	Size = UDim2.fromScale(1, 1),
 	BorderSizePixel = 0,
+	Active = true,   -- altindaki header butonlarina tiklama sizmasin
 	Visible = false,
 	ZIndex = 20,
 }, container)
@@ -1037,6 +1057,173 @@ local meRankVal = meStat("RANK", 1)
 local meMetricVal, meMetricCap = meStat("SCORE", 2)
 
 -- ========================================================================
+-- AYARLAR: sag alt disk butonu + ses paneli (master seviye + sessize alma).
+-- Tum widget'lar tek tabloda: Luau'nun 200 top-level local sinirini zorlamamak icin.
+-- ========================================================================
+local SET = {}
+
+SET.button = make("TextButton", {
+	Name = "SettingsButton",
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -16, 1, -16),
+	Size = UDim2.fromOffset(46, 46),
+	Font = Enum.Font.GothamBold,
+	Text = "⚙",
+	TextSize = 24,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 45,
+}, screenBg)
+corner(SET.button, TILE_RADIUS)
+stroke(SET.button)
+
+-- Tam ekran perde: Active = true olmasi sart, yoksa tiklama altindaki
+-- NEW / SHOP / tema butonlarina sizar ve turu yanlislikla bitirir
+SET.modal = make("Frame", {
+	Name = "SettingsModal",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.fromRGB(10, 10, 12),
+	BackgroundTransparency = 0.45,
+	Active = true,
+	Visible = false,
+	ZIndex = 60,
+}, screenBg)
+
+SET.panel = make("Frame", {
+	Name = "Panel",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.new(0.9, 0, 0, 210),
+	Active = true,
+	BorderSizePixel = 0,
+	ZIndex = 61,
+}, SET.modal)
+corner(SET.panel, BOARD_RADIUS)
+stroke(SET.panel)
+make("UISizeConstraint", { MaxSize = Vector2.new(420, 210) }, SET.panel)
+make("UIPadding", {
+	PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+	PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+}, SET.panel)
+
+SET.title = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 30),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	Text = "SETTINGS",
+	TextSize = 20,
+	ZIndex = 62,
+}, SET.panel)
+
+SET.close = make("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 0),
+	Size = UDim2.fromOffset(32, 32),
+	Font = Enum.Font.GothamBold,
+	Text = "X",
+	TextSize = 16,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 62,
+}, SET.panel)
+corner(SET.close, TILE_RADIUS)
+
+SET.row = make("Frame", {
+	Position = UDim2.new(0, 0, 0, 40),
+	Size = UDim2.new(1, 0, 0, 134),
+	BorderSizePixel = 0,
+	ZIndex = 62,
+}, SET.panel)
+corner(SET.row, TILE_RADIUS)
+
+SET.label = make("TextLabel", {
+	Position = UDim2.fromOffset(14, 12),
+	Size = UDim2.new(1, -100, 0, 20),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "SOUND EFFECTS",
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 63,
+}, SET.row)
+
+SET.percent = make("TextLabel", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -14, 0, 12),
+	Size = UDim2.fromOffset(80, 20),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	Text = "70%",
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	ZIndex = 63,
+}, SET.row)
+
+-- Gorunmez genis dokunma alani: 10 px'lik cizgi mobilde tutulamaz.
+-- TextButton oldugu icin isaretci girdisini kendisi alir.
+SET.hit = make("TextButton", {
+	Position = UDim2.fromOffset(14, 40),
+	Size = UDim2.new(1, -28, 0, 40),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	Active = true,
+	ZIndex = 64,
+}, SET.row)
+
+SET.track = make("Frame", {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 0, 0.5, 0),
+	Size = UDim2.new(1, 0, 0, 10),
+	BorderSizePixel = 0,
+	ZIndex = 63,
+}, SET.hit)
+corner(SET.track, 5)
+
+SET.fill = make("Frame", {
+	Size = UDim2.fromScale(0.7, 1),
+	BackgroundColor3 = ACCENT,
+	BorderSizePixel = 0,
+	ZIndex = 64,
+}, SET.track)
+corner(SET.fill, 5)
+
+SET.knob = make("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.7, 0.5),
+	Size = UDim2.fromOffset(20, 20),
+	BackgroundColor3 = ACCENT,
+	BorderSizePixel = 0,
+	ZIndex = 65,
+}, SET.track)
+corner(SET.knob, 10)
+
+SET.mute = make("TextButton", {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 14, 1, -12),
+	Size = UDim2.fromOffset(112, 34),
+	Font = Enum.Font.GothamBold,
+	Text = "MUTE",
+	TextSize = 13,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 63,
+}, SET.row)
+corner(SET.mute, 17)
+
+SET.hint = make("TextLabel", {
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -14, 1, -12),
+	Size = UDim2.new(1, -140, 0, 34),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Applies to all game sounds",
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	ZIndex = 63,
+}, SET.row)
+
+-- ========================================================================
 -- 5. THEME MANAGER
 -- ========================================================================
 -- Ileri bildirim: magaza icerigi tema degisiminde ve satin alma/sync olaylarinda yenilenir
@@ -1053,9 +1240,18 @@ local function applyTheme(name)
 	tween(board, { BackgroundColor3 = t.board })
 	tween(shopModal, { BackgroundColor3 = t.board })
 	tween(title, { TextColor3 = t.text })
-	for _, b in ipairs({ themeButton, topButton, shopButton, newButton, undoButton, closeButton }) do
+	for _, b in ipairs({ themeButton, topButton, shopButton, newButton, undoButton,
+		closeButton, SET.button, SET.close }) do
 		tween(b, { BackgroundColor3 = t.button, TextColor3 = t.buttonText })
 	end
+	tween(SET.panel, { BackgroundColor3 = t.board })
+	tween(SET.title, { TextColor3 = t.text })
+	tween(SET.row, { BackgroundColor3 = t.empty })
+	tween(SET.track, { BackgroundColor3 = t.button })
+	local rowText = textColorFor(t.empty)
+	tween(SET.label, { TextColor3 = rowText })
+	tween(SET.percent, { TextColor3 = rowText })
+	tween(SET.hint, { TextColor3 = rowText, TextTransparency = 0.35 })
 	-- Alt sekmelerin pasif olani tema rengini alir; aktif olan rebuildShop'ta mavi boyanir
 	if shopModal.Visible then rebuildShop() end
 	tween(modalTitle, { TextColor3 = t.text })
@@ -1077,6 +1273,13 @@ local function applyTheme(name)
 		end
 	end
 	themeButton.Text = THEME_ICON[name] or "☀️"
+	-- Mute butonu durum rengini korur (aktifken kirmizimsi)
+	if soundMuted then
+		SET.mute.BackgroundColor3 = hex("D32F2F")
+		SET.mute.TextColor3 = WHITE_TEXT
+	else
+		tween(SET.mute, { BackgroundColor3 = t.button, TextColor3 = t.buttonText })
+	end
 end
 
 -- Acik temalar: Light/Dark her zaman, digerleri magazadan alinmissa
@@ -1108,6 +1311,108 @@ themeButton.Activated:Connect(function()
 			task.wait(0.2)
 		end
 	end)
+end)
+
+-- ========================================================================
+-- AYARLAR: kaydirici surukleme + kalici tercih
+-- ========================================================================
+local settingsOpen = false
+local dragInput = nil   -- suruklemeyi baslatan InputObject (coklu dokunmayi ayirt eder)
+
+local function refreshSoundUI()
+	local ratio = soundVolume / 100
+	SET.fill.Size = UDim2.fromScale(ratio, 1)
+	SET.knob.Position = UDim2.fromScale(ratio, 0.5)
+	SET.percent.Text = soundMuted and "MUTED" or (soundVolume .. "%")
+	local dim = soundMuted and hex("6E6E76") or ACCENT
+	SET.fill.BackgroundColor3 = dim
+	SET.knob.BackgroundColor3 = dim
+	if soundMuted then
+		SET.mute.Text = "UNMUTE"
+		SET.mute.BackgroundColor3 = hex("D32F2F")
+		SET.mute.TextColor3 = WHITE_TEXT
+	else
+		local t = THEMES[currentTheme]
+		SET.mute.Text = "MUTE"
+		SET.mute.BackgroundColor3 = t.button
+		SET.mute.TextColor3 = t.buttonText
+	end
+end
+
+-- Tercihi sunucuya yaz (kaydirici birakilinca tek istek; hiz sinirinda tekrar dener)
+local function pushSoundSetting()
+	task.spawn(function()
+		for _ = 1, 3 do
+			local res = act({ a = "sfx", vol = soundVolume, muted = soundMuted })
+			if not (res and res.err == "too_fast") then return end
+			task.wait(0.2)
+		end
+	end)
+end
+
+local function setVolumeFromX(x)
+	local left = SET.track.AbsolutePosition.X
+	local width = SET.track.AbsoluteSize.X
+	if width <= 0 then return end
+	soundVolume = math.clamp(math.floor(((x - left) / width) * 100 + 0.5), 0, 100)
+	if soundVolume > 0 then soundMuted = false end
+	applySoundVolume()
+	refreshSoundUI()
+end
+
+SET.hit.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+		setVolumeFromX(input.Position.X)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if not dragInput then return end
+	-- Fare surukleme ayri bir InputObject uretir; dokunmada ayni parmak olmali
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		setVolumeFromX(input.Position.X)
+	elseif input == dragInput then
+		setVolumeFromX(input.Position.X)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if not dragInput then return end
+	if input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragInput = nil
+		pushSoundSetting()   -- yalnizca birakinca kaydedilir, istek seli olmaz
+	end
+end)
+
+SET.mute.Activated:Connect(function()
+	if not S.loaded then return end
+	soundMuted = not soundMuted
+	if not soundMuted and soundVolume == 0 then soundVolume = 50 end
+	applySoundVolume()
+	refreshSoundUI()
+	pushSoundSetting()
+end)
+
+local function setSettingsOpen(open)
+	settingsOpen = open
+	SET.modal.Visible = open
+	if open then
+		refreshSoundUI()
+	else
+		dragInput = nil   -- panel kapanirken takili surukleme kalmasin
+	end
+end
+
+SET.button.Activated:Connect(function()
+	-- Yukleme bitmeden acilirsa tercih sunucuya yazilamaz ve applyState ezer
+	if not S.loaded then return end
+	setSettingsOpen(not settingsOpen)
+end)
+
+SET.close.Activated:Connect(function()
+	setSettingsOpen(false)
 end)
 
 -- ========================================================================
@@ -1360,6 +1665,13 @@ local function applyState(state, earned)
 	if state.dailyStreak ~= nil then S.dailyStreak = state.dailyStreak end
 	if state.dailyContinues ~= nil then S.dailyContinues = state.dailyContinues end
 	if state.vip ~= nil then S.vip = state.vip == true end   -- 2x Coins gamepass
+	-- Ses tercihi sunucuda saklanir; yuklemede UI ve sesler eslenir
+	if type(state.sfx) == "number" then
+		soundVolume = math.clamp(math.floor(state.sfx), 0, 100)
+	end
+	if state.muted ~= nil then soundMuted = state.muted == true end
+	applySoundVolume()
+	refreshSoundUI()
 	if state.theme and state.theme ~= currentTheme then
 		applyTheme(state.theme)
 	end
@@ -1410,7 +1722,7 @@ end
 
 local function doMove(dir)
 	-- overlay/dailyLayer acikken hamle kilitli (Continue/New Game/Claim beklenir)
-	if not S.loaded or S.busy or S.over or S.shopOpen then return end
+	if not S.loaded or S.busy or S.over or S.shopOpen or settingsOpen then return end
 	if overlay.Visible or dailyLayer.Visible then return end
 	local changed, gained, anims, popSet = simMove(S.board, S.size, dir)
 	if not changed then return end

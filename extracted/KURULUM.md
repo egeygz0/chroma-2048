@@ -1,4 +1,30 @@
-# Neon Merge 2048 v5 — Kurulum ve Rehber
+# Neon Merge 2048 v5.1 — Kurulum ve Rehber
+
+## v5.1'de Yeni: Ayarlar Paneli ve Ses Kontrolü
+
+Sağ altta ⚙ butonu; tıklayınca tam ekran ayarlar paneli açılır.
+
+- **Tek noktadan ses kontrolü:** master seviye kaydırıcısı (0-100%) + MUTE düğmesi. Ses başına ayrı anahtar yerine bu yöntem tercih edildi (standart oyun UX'i); tüm efektleri birlikte yönetir.
+- Tercih **sunucuda kalıcı** saklanır (`sfx`, `muted`), oturumlar arası taşınır ve veri sıfırlamada korunur (ses ayarı ilerleme değildir).
+- Kaydırıcı bırakılınca tek istek gönderilir, sürüklerken istek seli olmaz.
+- Panel açıkken hamleler kilitlidir ve panel altındaki butonlara tıklama sızmaz.
+
+### Ses asset ID'leri
+
+Dosyanın başındaki `SOUND_IDS` tablosuna ID'leri yapıştır, `0` bırakılan ses hiç oluşturulmaz:
+
+| Anahtar | Ne zaman çalar |
+|---|---|
+| `move` | Kaydırma (birleştirme olmayan geçerli hamle) |
+| `merge` | Birleştirme |
+| `milestone` | Kutlama (2048 / 4096 / 8192) |
+| `buy` | Mağazada satın alma |
+| `gameOver` | Kaybetme |
+| `daily` | Günlük ödül |
+
+`SOUND_VOLUME` (varsayılan 0.5) %100 seviyedeki tavan şiddettir; kaydırıcı bunun yüzdesini uygular.
+
+# Neon Merge 2048 v5
 
 ## v5'te Yeni: Monetizasyon, Görsel Efektler, Sel Koruması, UX
 
