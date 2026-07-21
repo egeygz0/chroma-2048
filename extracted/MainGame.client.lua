@@ -23,6 +23,18 @@ local UserInputService  = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ReplicatedFirst   = game:GetService("ReplicatedFirst")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+-- ========================================================================
+-- MONETIZASYON ID'leri: Server.server.lua ile BIREBIR ayni olmali.
+-- 0 birakilan urun magazada gorunmez.
+-- ========================================================================
+local GAMEPASS_2X_COINS    = 0
+local PRODUCT_COINS_1K     = 0
+local PRODUCT_COINS_5K     = 0
+local PRODUCT_COINS_15K    = 0
+local PRODUCT_THEME_NEON   = 0
+local PRODUCT_THEME_SUNSET = 0
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -204,9 +216,12 @@ local function tileBonus(maxTile)
 	return 0
 end
 
-local function coinsForRun(score, maxTile, coinLv)
+-- vip: 2x Coins gamepass sahipligi (sunucudaki kopyayla birebir ayni olmali)
+local function coinsForRun(score, maxTile, coinLv, vip)
 	local base = math.floor(score / 200) + tileBonus(maxTile)
-	return math.floor(base * (1 + 0.25 * coinLv))
+	local total = math.floor(base * (1 + 0.25 * coinLv))
+	if vip then total *= 2 end
+	return total
 end
 
 -- ========================================================================
@@ -348,7 +363,7 @@ local S = {
 	loaded = false, busy = false, shopOpen = false,
 	size = 4, board = nil, score = 0, best = 0, coins = 0,
 	seed = 1, spawns = 0, undoLeft = 0, won = false, over = false,
-	milestone = 0, dailyReady = false, dailyStreak = 0, dailyContinues = false,
+	milestone = 0, dailyReady = false, dailyStreak = 0, dailyContinues = false, vip = false,
 	up = { spawn = 0, start = 0, undo = 0, coin = 0, grid5 = 0, themeNeon = 0, themeSunset = 0 },
 }
 local currentTheme = "Light"
@@ -570,7 +585,7 @@ local board = make("Frame", {
 	BorderSizePixel = 0,
 }, container)
 corner(board, BOARD_RADIUS)
-stroke(board)
+local boardStroke = stroke(board)   -- kutlama efektinde parlatilir
 make("UIAspectRatioConstraint", {
 	AspectRatio = 1,
 	AspectType = Enum.AspectType.FitWithinMaxSize,
@@ -602,6 +617,17 @@ local animLayer = make("Frame", {
 	BackgroundTransparency = 1,
 	ZIndex = 5,
 }, board)
+
+-- Efekt katmani: konfeti her seyin ustunde ciziliyor (overlay dahil)
+local fxLayer = make("Frame", {
+	Name = "FxLayer",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	ClipsDescendants = true,
+	Active = false,
+	ZIndex = 30,
+}, board)
+corner(fxLayer, BOARD_RADIUS)
 
 local cells = {}   -- cells[r][c] = { frame, tile, scale }
 
@@ -678,6 +704,37 @@ end
 
 local function hideLoading()
 	loadingLayer.Visible = false
+end
+
+-- Autosave gostergesi: sunucu kayit bildirdiginde 1.5 sn gorunup soner
+local saveLabel = make("TextLabel", {
+	Name = "SaveIndicator",
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -4, 1, -4),
+	Size = UDim2.fromOffset(110, 20),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "💾 Saving...",
+	TextSize = 12,
+	TextTransparency = 1,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	ZIndex = 40,
+}, container)
+
+local saveToken = 0
+local function flashSaveIndicator()
+	saveToken += 1
+	local token = saveToken
+	saveLabel.TextColor3 = THEMES[currentTheme].statLabel
+	TweenService:Create(saveLabel,
+		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ TextTransparency = 0.15 }):Play()
+	task.delay(1.5, function()
+		if token ~= saveToken then return end   -- yeni kayit geldi, o kendi zamanlayicisini kurar
+		TweenService:Create(saveLabel,
+			TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ TextTransparency = 1 }):Play()
+	end)
 end
 
 -- Game over / win katmani
@@ -776,6 +833,59 @@ local dailySub = make("TextLabel", {
 	ZIndex = 13,
 }, dailyLayer)
 make("UITextSizeConstraint", { MaxTextSize = 20 }, dailySub)
+
+-- Ilk oyun ipucu: yalnizca hic ilerlemesi olmayan oyuncuya, ilk gecerli hamlede yok olur
+local tutorialTip = make("TextLabel", {
+	Name = "TutorialTip",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.new(0.86, 0, 0, 66),
+	BackgroundColor3 = Color3.fromRGB(20, 20, 24),
+	BackgroundTransparency = 0.12,
+	Font = Enum.Font.GothamBold,
+	Text = "Swipe or press W/A/S/D to slide\nand merge identical tiles!",
+	TextColor3 = WHITE_TEXT,
+	TextSize = 15,
+	TextWrapped = true,
+	Visible = false,
+	ZIndex = 25,
+}, board)
+corner(tutorialTip, TILE_RADIUS)
+
+local tutorialActive = false
+
+local function showTutorial()
+	tutorialActive = true
+	tutorialTip.Visible = true
+	tutorialTip.TextTransparency = 1
+	tutorialTip.BackgroundTransparency = 1
+	TweenService:Create(tutorialTip, TweenInfo.new(0.35), {
+		TextTransparency = 0, BackgroundTransparency = 0.12,
+	}):Play()
+	-- Hafif suzulme: dikkat ceker ama rahatsiz etmez
+	task.spawn(function()
+		local up = true
+		while tutorialActive do
+			TweenService:Create(tutorialTip,
+				TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+					Position = UDim2.new(0.5, 0, 0.5, up and -6 or 6),
+				}):Play()
+			up = not up
+			task.wait(1.1)
+		end
+	end)
+end
+
+local function dismissTutorial()
+	if not tutorialActive then return end
+	tutorialActive = false
+	TweenService:Create(tutorialTip, TweenInfo.new(0.3), {
+		TextTransparency = 1, BackgroundTransparency = 1,
+	}):Play()
+	task.delay(0.35, function()
+		tutorialTip:Destroy()   -- kalici olarak yok edilir
+	end)
+end
 
 local dailyButton = make("TextButton", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
@@ -975,12 +1085,95 @@ themeButton.Activated:Connect(function()
 	end
 	local nextTheme = list[(index % #list) + 1]
 	applyTheme(nextTheme)
-	task.spawn(act, { a = "theme", t = nextTheme })
+	-- Hiz sinirina takilirsa tekrar dene, yoksa sunucu eski temayi kaydeder
+	task.spawn(function()
+		for _ = 1, 3 do
+			local res = act({ a = "theme", t = nextTheme })
+			if not (res and res.err == "too_fast") then return end
+			task.wait(0.2)
+		end
+	end)
 end)
 
 -- ========================================================================
--- 6. RENDER + ANIMASYON
+-- 6. RENDER + ANIMASYON + GORSEL EFEKTLER
 -- ========================================================================
+
+-- Yuksek degerli birlestirmede (512+) kisa, sert tahta sarsintisi (~0.12 sn)
+local BOARD_BASE_POS = board.Position
+local shakeToken = 0
+
+local function shakeBoard()
+	shakeToken += 1
+	local token = shakeToken
+	task.spawn(function()
+		local steps = 4
+		for i = 1, steps do
+			if token ~= shakeToken then return end
+			local decay = 1 - (i - 1) / steps
+			local mag = (2 + math.random() * 2) * decay   -- 2-4 px, sonuna dogru soner
+			local angle = math.random() * math.pi * 2
+			TweenService:Create(board, TweenInfo.new(0.03, Enum.EasingStyle.Linear), {
+				Position = BOARD_BASE_POS + UDim2.fromOffset(
+					math.cos(angle) * mag, math.sin(angle) * mag),
+			}):Play()
+			task.wait(0.03)
+		end
+		if token == shakeToken then
+			TweenService:Create(board, TweenInfo.new(0.03, Enum.EasingStyle.Quad), {
+				Position = BOARD_BASE_POS,
+			}):Play()
+		end
+	end)
+end
+
+-- Kutlama: renkli konfeti parcaciklari + tahta cercevesinin parlamasi
+local CONFETTI_COLORS = {
+	hex("FFD700"), hex("FF4500"), hex("FF1493"),
+	hex("00E676"), hex("00E5FF"), hex("AA00FF"),
+}
+
+local function pulseStroke()
+	TweenService:Create(boardStroke,
+		TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Transparency = 0, Thickness = 4 }):Play()
+	task.delay(0.22, function()
+		-- Tema bu arada degismis olabilir: guncel degerlere don
+		TweenService:Create(boardStroke,
+			TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Transparency = THEMES[currentTheme].strokeT, Thickness = 1.5 }):Play()
+	end)
+end
+
+local function burstConfetti(count)
+	pulseStroke()
+	for i = 1, count do
+		local size = math.random(6, 13)
+		local piece = make("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.15 + math.random() * 0.7, -0.05 - math.random() * 0.15),
+			Size = UDim2.fromOffset(size, size),
+			BackgroundColor3 = CONFETTI_COLORS[math.random(#CONFETTI_COLORS)],
+			BorderSizePixel = 0,
+			Rotation = math.random(0, 360),
+			ZIndex = 31,
+		}, fxLayer)
+		corner(piece, math.floor(size / 2))
+		local fallTime = 0.9 + math.random() * 0.7
+		TweenService:Create(piece, TweenInfo.new(fallTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Position = UDim2.fromScale(
+				math.clamp(piece.Position.X.Scale + (math.random() - 0.5) * 0.3, 0, 1), 1.15),
+			Rotation = piece.Rotation + math.random(-260, 260),
+		}):Play()
+		TweenService:Create(piece, TweenInfo.new(fallTime, Enum.EasingStyle.Linear), {
+			BackgroundTransparency = 1,
+		}):Play()
+		task.delay(fallTime + 0.05, function()
+			piece:Destroy()
+		end)
+	end
+end
+
 local function popTile(scale)
 	scale.Scale = 0.8
 	local up = TweenService:Create(scale,
@@ -1141,6 +1334,9 @@ local function showWin(tile)
 	overlay.Visible = true
 end
 
+-- Ileri bildirim: magaza icerigi satin alma/sync olaylarinda yenilenir
+local rebuildShop
+
 -- Sunucudan gelen tam durumu uygula
 local function applyState(state, earned)
 	if type(state) ~= "table" then return end
@@ -1151,6 +1347,7 @@ local function applyState(state, earned)
 	if state.dailyReady ~= nil then S.dailyReady = state.dailyReady end
 	if state.dailyStreak ~= nil then S.dailyStreak = state.dailyStreak end
 	if state.dailyContinues ~= nil then S.dailyContinues = state.dailyContinues end
+	if state.vip ~= nil then S.vip = state.vip == true end   -- 2x Coins gamepass
 	if state.theme and state.theme ~= currentTheme then
 		applyTheme(state.theme)
 	end
@@ -1206,12 +1403,20 @@ local function doMove(dir)
 	local changed, gained, anims, popSet = simMove(S.board, S.size, dir)
 	if not changed then return end
 	S.busy = true
+	dismissTutorial()   -- ilk gecerli hamlede ipucu kalici olarak kaybolur
 	S.score = S.score + gained
 	local sr, sc = spawnTile(S.board, S.size, S.seed, S.spawns, S.up.spawn)
 	S.spawns += 1
 	if sr then popSet[sr .. "_" .. sc] = true end
 	queueMove(dir)
 	playSound((gained > 0) and "merge" or "move")
+
+	-- 512+ birlestirmede tahta sarsilir (anims'te merged girisleri birlesme oncesi degeri tutar)
+	local maxMerge = 0
+	for _, a in ipairs(anims) do
+		if a.merged and a.v * 2 > maxMerge then maxMerge = a.v * 2 end
+	end
+	if maxMerge >= 512 then shakeBoard() end
 
 	local maxTile = boardMax(S.board, S.size)
 	local newMilestone = nil
@@ -1225,12 +1430,13 @@ local function doMove(dir)
 		if newMilestone then
 			showWin(newMilestone)
 			playSound("milestone")
+			burstConfetti(28)
 		end
 		if not hasMoves(S.board, S.size) then
 			S.over = true
 			-- Odul metni lokal formulle aninda gosterilir; coin bakiyesini
 			-- YALNIZCA sunucu gunceller (NM_Sync "over"), cift sayim olmaz
-			local earned = coinsForRun(S.score, maxTile, S.up.coin)
+			local earned = coinsForRun(S.score, maxTile, S.up.coin, S.vip)
 			updateHUD()
 			showOver(earned)
 			playSound("gameOver")
@@ -1282,6 +1488,7 @@ dailyButton.Activated:Connect(function()
 		S.dailyReady = false
 		updateHUD()
 		playSound("daily")
+		burstConfetti(24)
 		dailyTitle.Text = "+" .. (res.reward or 0) .. " COINS"
 		dailySub.Text = "Come back tomorrow"
 		dailyButton.Text = "Play"
@@ -1315,6 +1522,18 @@ SyncEvent.OnClientEvent:Connect(function(p)
 		S.best = math.max(S.best, p.best or 0)
 		if p.tile and p.tile > S.milestone then S.milestone = p.tile end
 		updateHUD()
+	elseif p.ev == "saved" then
+		flashSaveIndicator()
+	elseif p.ev == "vip" then
+		S.vip = p.vip == true
+		if S.shopOpen then rebuildShop() end
+	elseif p.ev == "purchase" then
+		-- Robux satin almasi sunucuda islendi
+		S.coins = p.coins or S.coins
+		S.up = p.up or S.up
+		updateHUD()
+		burstConfetti(18)
+		if S.shopOpen then rebuildShop() end
 	elseif p.ev == "resync" then
 		applyState(p.state)
 	end
@@ -1340,27 +1559,149 @@ local function shopRow(height)
 	return row, textColorFor(t.empty)
 end
 
-local rebuildShop   -- ileri bildirim (buy butonu icinden cagrilir)
+-- Robux ile alinabilen urunler (ID 0 ise satirlari hic olusturulmaz)
+local COIN_BUNDLES = {
+	{ id = PRODUCT_COINS_1K,  amount = 1000,  label = "+1,000 Coins" },
+	{ id = PRODUCT_COINS_5K,  amount = 5000,  label = "+5,000 Coins" },
+	{ id = PRODUCT_COINS_15K, amount = 15000, label = "+15,000 Coins" },
+}
+local THEME_PRODUCTS = { themeNeon = PRODUCT_THEME_NEON, themeSunset = PRODUCT_THEME_SUNSET }
+
+local function promptProduct(productId)
+	pcall(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+end
+
+local function promptGamePass(passId)
+	pcall(function()
+		MarketplaceService:PromptGamePassPurchase(player, passId)
+	end)
+end
+
+-- Robux fiyat butonu: satirin sagina yerlesir
+local function robuxButton(parent, text, xOffset, width, onClick)
+	local b = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, xOffset, 0.5, 0),
+		Size = UDim2.fromOffset(width, 36),
+		BackgroundColor3 = hex("00A24E"),
+		Font = Enum.Font.GothamBold,
+		Text = text,
+		TextColor3 = WHITE_TEXT,
+		TextSize = 13,
+		AutoButtonColor = true,
+		BorderSizePixel = 0,
+		ZIndex = 22,
+	}, parent)
+	corner(b, 18)
+	b.Activated:Connect(onClick)
+	return b
+end
+
+local function sectionHeader(text)
+	local t = THEMES[currentTheme]
+	local head = make("Frame", {
+		Size = UDim2.new(1, -6, 0, 18),
+		BackgroundTransparency = 1,
+		ZIndex = 21,
+	}, shopList)
+	make("TextLabel", {
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -10, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = text,
+		TextColor3 = t.statLabel,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 22,
+	}, head)
+end
 
 local function buildShopRows()
 	local t = THEMES[currentTheme]
+
+	-- BUY COINS bolumu: yalnizca tanimli urunler gosterilir
+	local bundles = {}
+	for _, bundle in ipairs(COIN_BUNDLES) do
+		if bundle.id ~= 0 then table.insert(bundles, bundle) end
+	end
+	local vipSellable = (GAMEPASS_2X_COINS ~= 0) and not S.vip
+	if #bundles > 0 or vipSellable then
+		sectionHeader("BUY COINS")
+		for _, bundle in ipairs(bundles) do
+			local row, rowText = shopRow(52)
+			coinIcon(row, 20, 22).Position = UDim2.new(0, 10, 0.5, 0)
+			make("TextLabel", {
+				Position = UDim2.fromOffset(38, 0),
+				Size = UDim2.new(1, -150, 1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = bundle.label,
+				TextColor3 = rowText,
+				TextSize = 14,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 22,
+			}, row)
+			robuxButton(row, "R$ BUY", -10, 96, function()
+				promptProduct(bundle.id)
+			end)
+		end
+		if vipSellable then
+			local row, rowText = shopRow(58)
+			make("TextLabel", {
+				Position = UDim2.fromOffset(10, 8),
+				Size = UDim2.new(1, -120, 0, 18),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = "VIP 2x Coins",
+				TextColor3 = rowText,
+				TextSize = 14,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 22,
+			}, row)
+			make("TextLabel", {
+				Position = UDim2.fromOffset(10, 28),
+				Size = UDim2.new(1, -120, 0, 20),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Gotham,
+				Text = "Permanent: double coins from every run",
+				TextColor3 = rowText,
+				TextTransparency = 0.25,
+				TextSize = 11,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 22,
+			}, row)
+			robuxButton(row, "R$ BUY", -10, 96, function()
+				promptGamePass(GAMEPASS_2X_COINS)
+			end)
+		end
+		sectionHeader("UPGRADES")
+	end
+
 	for _, item in ipairs(SHOP) do
 		local lv = S.up[item.id]
 		local row, rowText = shopRow(64)
+		-- Robux alternatifi varsa metin alani daralir, butonlarin altina girmez
+		local themeProduct = THEME_PRODUCTS[item.id]
+		local hasRobuxAlt = (themeProduct ~= nil and themeProduct ~= 0 and lv < item.max)
+		local textInset = hasRobuxAlt and -188 or -130
 		make("TextLabel", {
 			Position = UDim2.fromOffset(10, 8),
-			Size = UDim2.new(1, -130, 0, 18),
+			Size = UDim2.new(1, textInset, 0, 18),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Text = item.name .. "  (" .. lv .. "/" .. item.max .. ")",
 			TextColor3 = rowText,
 			TextSize = 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			ZIndex = 22,
 		}, row)
 		make("TextLabel", {
 			Position = UDim2.fromOffset(10, 30),
-			Size = UDim2.new(1, -130, 0, 26),
+			Size = UDim2.new(1, textInset, 0, 26),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Gotham,
 			Text = item.desc,
@@ -1372,9 +1713,16 @@ local function buildShopRows()
 			TextYAlignment = Enum.TextYAlignment.Top,
 			ZIndex = 22,
 		}, row)
+		-- Tema urunlerinde Robux alternatifi: coin fiyati sola kayar
+		if hasRobuxAlt then
+			robuxButton(row, "R$", -10, 52, function()
+				promptProduct(themeProduct)
+			end)
+		end
+
 		local buyButton = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -10, 0.5, 0),
+			Position = UDim2.new(1, hasRobuxAlt and -68 or -10, 0.5, 0),
 			Size = UDim2.fromOffset(104, 36),
 			Font = Enum.Font.GothamBold,
 			TextSize = 14,
@@ -1529,6 +1877,15 @@ local function buildTopRows()
 	task.spawn(function()
 		local res = act({ a = "top", board = boardKind })
 		if not shopModal.Visible or shopTab ~= "top" or token ~= topRefreshToken then return end
+		-- Hiz siniri: kisa sure sonra kendiliginden tekrar dene
+		if res and res.err == "too_fast" then
+			task.delay(0.35, function()
+				if shopModal.Visible and shopTab == "top" and token == topRefreshToken then
+					rebuildShop()
+				end
+			end)
+			return
+		end
 		loadingRow:Destroy()
 		local t = THEMES[currentTheme]
 		local list = (res and res.ok and res.list) or {}
@@ -1751,7 +2108,22 @@ task.spawn(function()
 			S.loaded = true
 			hideLoading()
 			initSounds(gui)
+			-- Ilk kez oynayan (hic skoru ve coini yok): ipucu gosterilir.
+			-- Gunluk odul katmani aciksa once onun kapanmasi beklenir.
+			local firstTime = (S.best == 0 and S.coins == 0)
 			showDaily()
+			if firstTime then
+				if dailyLayer.Visible then
+					local conn
+					conn = dailyLayer:GetPropertyChangedSignal("Visible"):Connect(function()
+						if dailyLayer.Visible then return end
+						conn:Disconnect()
+						if S.best == 0 then showTutorial() end
+					end)
+				else
+					showTutorial()
+				end
+			end
 		else
 			if os.clock() - startedAt >= 4 then
 				setLoading("Save server unavailable\nRetrying...")

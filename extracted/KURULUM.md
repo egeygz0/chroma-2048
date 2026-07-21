@@ -1,4 +1,29 @@
-# Neon Merge 2048 v4 — Kurulum ve Rehber
+# Neon Merge 2048 v5 — Kurulum ve Rehber
+
+## v5'te Yeni: Monetizasyon, Görsel Efektler, Sel Koruması, UX
+
+### Monetizasyon kurulumu (MarketplaceService)
+
+Ürünleri [create.roblox.com](https://create.roblox.com) > Creations > oyunun > Monetization altında oluştur, sayısal ID'leri **iki dosyada birden** dosya başındaki sabitlere yapıştır. `0` bırakılan ürün mağazada görünmez, oyun normal çalışır.
+
+| Sabit | Tür | Etkisi |
+|---|---|---|
+| `GAMEPASS_2X_COINS` | Gamepass | Tur sonu coin ödülü kalıcı 2 kat |
+| `PRODUCT_COINS_1K` / `5K` / `15K` | Developer Product | Anında +1.000 / +5.000 / +15.000 coin |
+| `PRODUCT_THEME_NEON` / `SUNSET` | Developer Product | Temayı Robux ile açar (coin alternatifi) |
+
+- Gamepass sahipliği girişte önbelleklenir, oyun içi satın almada anında aktifleşir.
+- `ProcessReceipt` makbuzları `PurchaseId` ile tekilleştirir (son 40 kayıtta tutulur); oturum hazır değilse veya kayıt yazılamazsa `NotProcessedYet` döner, satın alma kaybolmaz. Sunucuda tanımlı olmayan ürün ID'si de `NotProcessedYet` döner ki Robux karşılıksız yanmasın.
+- Veri sıfırlama (`RESET ALL DATA`) Robux ile alınmış hakları korur: gamepass, makbuz geçmişi ve Robux'la açılmış temalar geri verilir; coin ile alınanlar sıfırlanır.
+
+### Diğer
+
+- **Görsel efektler:** 512+ birleştirmede tahtaya 0.12 sn'lik sarsıntı; kilometre taşı ve günlük ödülde konfeti patlaması + tahta çerçevesinin parlaması.
+- **NM_Act sel koruması:** oyuncu başına `SERVER_ACT_DEBOUNCE = 0.15` sn; sınır aşılırsa durum ve DataStore mantığına hiç girilmeden `{ ok = false, err = "too_fast" }` döner. Zaman damgaları `PlayerRemoving`'de temizlenir.
+- **Autosave göstergesi:** sunucu kaydı başarıyla yazınca sağ altta 1.5 sn "💾 Saving..." belirip söner.
+- **İlk oyun ipucu:** hiç skoru ve coini olmayan oyuncuya tahtanın üstünde yüzen ipucu; ilk geçerli hamlede kalıcı olarak kaybolur.
+
+# Neon Merge 2048 v4
 
 ## v4'te Yeni
 

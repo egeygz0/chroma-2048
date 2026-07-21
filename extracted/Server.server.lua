@@ -19,10 +19,25 @@
 	NOT: MainGame.client.lua ile birlikte guncelle.
 ]]
 
-local DataStoreService  = game:GetService("DataStoreService")
-local Players           = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService        = game:GetService("RunService")
+local DataStoreService    = game:GetService("DataStoreService")
+local Players             = game:GetService("Players")
+local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local RunService          = game:GetService("RunService")
+local MarketplaceService  = game:GetService("MarketplaceService")
+
+-- ========================================================================
+-- MONETIZASYON: ID'leri create.roblox.com'dan alip buraya yapistir.
+-- 0 birakilan urun satilamaz, oyun normal calisir.
+-- Ayni ID'ler MainGame.client.lua icinde de tanimli, ikisini birlikte guncelle.
+-- ========================================================================
+local GAMEPASS_2X_COINS    = 0   -- kalici: tur sonu coin odulu 2 kat
+local PRODUCT_COINS_1K     = 0   -- tekrar alinabilir: +1.000 coin
+local PRODUCT_COINS_5K     = 0   -- tekrar alinabilir: +5.000 coin
+local PRODUCT_COINS_15K    = 0   -- tekrar alinabilir: +15.000 coin
+local PRODUCT_THEME_NEON   = 0   -- Neon temasini Robux ile ac
+local PRODUCT_THEME_SUNSET = 0   -- Sunset temasini Robux ile ac
+
+local SERVER_ACT_DEBOUNCE = 0.15   -- NM_Act istekleri arasi asgari sure
 
 local STORE_NAME        = "NeonMerge2048Save_v1"
 local TOP_STORE_NAME    = "NeonMerge2048Top_v1"      -- skor siralamasi
@@ -109,9 +124,12 @@ local function tileBonus(maxTile)
 	return 0
 end
 
-local function coinsForRun(score, maxTile, coinLv)
+-- vip: 2x Coins gamepass sahipligi (istemcideki kopyayla birebir ayni olmali)
+local function coinsForRun(score, maxTile, coinLv, vip)
 	local base = math.floor(score / 200) + tileBonus(maxTile)
-	return math.floor(base * (1 + 0.25 * coinLv))
+	local total = math.floor(base * (1 + 0.25 * coinLv))
+	if vip then total *= 2 end
+	return total
 end
 
 -- ========================================================================
@@ -295,8 +313,49 @@ local function defaultData()
 		theme = "Light",
 		up = sanitizeUp(nil),
 		daily = { day = 0, streak = 0 },
+		receipts = {},   -- islenmis PurchaseId listesi (cift islemeyi onler)
+		paid = {},       -- Robux ile alinmis kalici kilitler (wipe sonrasi geri verilir)
 		run = nil,
 	}
+end
+
+local function sanitizePaid(p)
+	local out = {}
+	if type(p) == "table" then
+		for _, item in ipairs(SHOP) do
+			if p[item.id] == true then out[item.id] = true end
+		end
+	end
+	return out
+end
+
+local MAX_RECEIPTS = 40
+
+local function sanitizeReceipts(list)
+	local out = {}
+	if type(list) == "table" then
+		for _, id in ipairs(list) do
+			if type(id) == "string" and #id <= 64 then
+				table.insert(out, id)
+				if #out >= MAX_RECEIPTS then break end
+			end
+		end
+	end
+	return out
+end
+
+local function hasReceipt(data, id)
+	for _, existing in ipairs(data.receipts) do
+		if existing == id then return true end
+	end
+	return false
+end
+
+local function addReceipt(data, id)
+	table.insert(data.receipts, id)
+	while #data.receipts > MAX_RECEIPTS do
+		table.remove(data.receipts, 1)
+	end
 end
 
 local function sanitizeDaily(d)
@@ -349,6 +408,7 @@ local function publicState(data)
 		dailyReady = data.daily.day < dayNumber(),
 		dailyStreak = data.daily.streak,
 		dailyContinues = (data.daily.day == dayNumber() - 1),   -- seri kopmus mu
+		vip = data.vip == true,   -- 2x Coins gamepass (oturumdan kopyalanir)
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
@@ -421,7 +481,8 @@ end
 local function endRun(session, run)
 	local data = session.data
 	local maxTile = boardMax(run.board, run.size)
-	local earned = coinsForRun(run.score, maxTile, data.up.coin)
+	-- data.vip gecicidir: gamepass sahipliginden gelir, kayda yazilmaz
+	local earned = coinsForRun(run.score, maxTile, data.up.coin, data.vip)
 	data.coins = math.min(data.coins + earned, MAX_COINS)
 	data.bestTile = math.max(data.bestTile, maxTile)
 	if run.score > data.best then
@@ -464,8 +525,10 @@ local function loadData(userId)
 					data.coins    = sanitizeNumber(result.coins, MAX_COINS) or 0
 					data.best     = sanitizeNumber(result.best, MAX_SCORE) or 0
 					data.bestTile = sanitizeNumber(result.bestTile, 1048576) or 0
-					data.up    = sanitizeUp(result.up)
-					data.daily = sanitizeDaily(result.daily)
+					data.up       = sanitizeUp(result.up)
+					data.daily    = sanitizeDaily(result.daily)
+					data.receipts = sanitizeReceipts(result.receipts)
+					data.paid     = sanitizePaid(result.paid)
 					data.theme = (type(result.theme) == "string" and themeAllowed(data, result.theme))
 						and result.theme or "Light"
 					local run = result.run
@@ -529,6 +592,8 @@ local function serializeData(data)
 		theme = data.theme,
 		up = deepCopy(data.up),
 		daily = deepCopy(data.daily),
+		receipts = deepCopy(data.receipts),
+		paid = deepCopy(data.paid),
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
@@ -552,16 +617,6 @@ local function writeData(userId, payload)
 	return false
 end
 
-local function saveSession(playerObj, session, force)
-	if not session or not session.loaded then return end
-	if not session.dirty and not force then return end
-	local now = os.clock()
-	if not force and (now - session.lastWrite) < MIN_WRITE_GAP then return end
-	session.lastWrite = now
-	session.dirty = false
-	writeData(playerObj.UserId, serializeData(session.data))
-end
-
 -- ========================================================================
 -- Remotes
 -- ========================================================================
@@ -580,6 +635,123 @@ MoveEvent.Parent = ReplicatedStorage
 local SyncEvent = Instance.new("RemoteEvent")
 SyncEvent.Name = "NM_Sync"
 SyncEvent.Parent = ReplicatedStorage
+
+-- Yazma basariliysa istemciye "saved" bildirir (autosave gostergesi).
+-- session.saving kilidi: es zamanli iki yazma birbirinin uzerine eski payload
+-- yazamaz (ornegin arka arkaya iki Robux satin almasi).
+local function saveSession(playerObj, session, force)
+	if not session or not session.loaded then return false end
+	if not session.dirty and not force then return false end
+
+	if session.saving then
+		-- Devam eden yazma var: bitmesini bekle, sonra guncel veriyle tekrar yaz
+		local deadline = os.clock() + 15
+		while session.saving and os.clock() < deadline do
+			task.wait(0.05)
+		end
+		if session.saving then return false end
+		if not session.dirty and not force then return true end
+	end
+
+	local now = os.clock()
+	if not force and (now - session.lastWrite) < MIN_WRITE_GAP then return false end
+
+	session.saving = true
+	session.lastWrite = now
+	session.dirty = false
+	local ok = writeData(playerObj.UserId, serializeData(session.data))
+	session.saving = false
+
+	if not ok then
+		session.dirty = true   -- basarisiz yazma kaybolmasin, sonraki turda tekrar denenir
+	elseif playerObj.Parent then
+		SyncEvent:FireClient(playerObj, { ev = "saved" })
+	end
+	return ok
+end
+
+-- ========================================================================
+-- Monetizasyon: gamepass sahipligi + developer product islemleri
+-- ========================================================================
+local PRODUCT_GRANTS = {}   -- [productId] = { kind = "coins"|"theme", ... }
+
+local function registerProduct(id, grant)
+	if id ~= 0 then PRODUCT_GRANTS[id] = grant end
+end
+registerProduct(PRODUCT_COINS_1K,     { kind = "coins", amount = 1000 })
+registerProduct(PRODUCT_COINS_5K,     { kind = "coins", amount = 5000 })
+registerProduct(PRODUCT_COINS_15K,    { kind = "coins", amount = 15000 })
+registerProduct(PRODUCT_THEME_NEON,   { kind = "theme", up = "themeNeon" })
+registerProduct(PRODUCT_THEME_SUNSET, { kind = "theme", up = "themeSunset" })
+
+-- Sahiplik oturum boyunca onbelleklenir; oyun ici satin almada aninda tazelenir
+local function refreshVip(playerObj, session)
+	if GAMEPASS_2X_COINS == 0 then return end
+	local ok, owns = pcall(function()
+		return MarketplaceService:UserOwnsGamePassAsync(playerObj.UserId, GAMEPASS_2X_COINS)
+	end)
+	if ok and session.data then
+		session.data.vip = owns and true or false
+	end
+end
+
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(playerObj, gamePassId, wasPurchased)
+	if not wasPurchased or gamePassId ~= GAMEPASS_2X_COINS then return end
+	local session = sessions[playerObj]
+	if not session or not session.loaded then return end
+	session.data.vip = true
+	SyncEvent:FireClient(playerObj, { ev = "vip", vip = true })
+end)
+
+-- Developer product satin almalari. Oturum hazir degilse NotProcessedYet
+-- dondurulur; Roblox tekrar dener, satin alma kaybolmaz.
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local playerObj = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not playerObj then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	local session = sessions[playerObj]
+	if not session or not session.loaded then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	local grant = PRODUCT_GRANTS[receiptInfo.ProductId]
+	if not grant then
+		-- ID sunucuda tanimli degil (ornegin yalnizca istemciye yazilmis).
+		-- PurchaseGranted donersek Robux karsiliksiz yanar; tekrar denensin ki
+		-- ID eklendiginde satin alma islensin.
+		warn("[NeonMerge2048] Tanimsiz urun ID: " .. tostring(receiptInfo.ProductId)
+			.. " - Server.server.lua icindeki PRODUCT_* sabitlerini doldur")
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	local data = session.data
+	local purchaseKey = tostring(receiptInfo.PurchaseId)
+	if hasReceipt(data, purchaseKey) then
+		-- Zaten islenmis ama diske yazilmamis olabilir: once kalicilastir
+		if session.dirty and not saveSession(playerObj, session, true) then
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+
+	if grant.kind == "coins" then
+		data.coins = math.min(data.coins + grant.amount, MAX_COINS)
+	elseif grant.kind == "theme" then
+		data.up[grant.up] = 1
+		data.paid[grant.up] = true   -- Robux ile alindi: veri sifirlansa da geri verilir
+	end
+	addReceipt(data, purchaseKey)
+	session.dirty = true
+
+	-- Yazma basarisizsa odul verilmis sayilmaz; Roblox tekrar dener
+	if not saveSession(playerObj, session, true) then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	SyncEvent:FireClient(playerObj, {
+		ev = "purchase", coins = data.coins, up = deepCopy(data.up),
+	})
+	return Enum.ProductPurchaseDecision.PurchaseGranted
+end
 
 -- ========================================================================
 -- Oyuncu akisi
@@ -613,6 +785,9 @@ local function onPlayerAdded(playerObj)
 				session.data = data
 				session.topWritten = data.best
 				session.tileWritten = data.bestTile
+				-- vip, loaded'dan ONCE belirlenmeli: waitSession loaded'i gorur gormez
+				-- doner, sonra bakilirsa ilk GetData yaniti vip=false gider
+				refreshVip(playerObj, session)
 				session.loaded = true
 				return
 			end
@@ -745,7 +920,18 @@ MoveEvent.OnServerEvent:Connect(function(playerObj, payload)
 	end
 end)
 
+-- NM_Act sel korumasi: istek basina asgari SERVER_ACT_DEBOUNCE bekleme.
+-- Sinir asilirsa DataStore/durum mantigina hic girilmez, CPU harcanmaz.
+local lastActTimes = {}
+
 Act.OnServerInvoke = function(playerObj, req)
+	local now = os.clock()
+	local last = lastActTimes[playerObj]
+	if last and (now - last) < SERVER_ACT_DEBOUNCE then
+		return { ok = false, err = "too_fast" }
+	end
+	lastActTimes[playerObj] = now
+
 	local session = sessions[playerObj]
 	if not session or not session.loaded then return { ok = false, err = "loading" } end
 	if type(req) ~= "table" or type(req.a) ~= "string" then return { ok = false, err = "bad" } end
@@ -820,8 +1006,16 @@ Act.OnServerInvoke = function(playerObj, req)
 		return { ok = true, reward = reward, streak = data.daily.streak, coins = data.coins }
 
 	elseif a == "wipe" then
-		-- Tum ilerlemeyi siler; istemci iki asamali onay ister
+		-- Tum ilerlemeyi siler; istemci iki asamali onay ister.
+		-- Robux ile alinmis haklar korunur: gamepass, makbuz gecmisi ve
+		-- Robux'la acilmis kilitler (coin ile alinanlar sifirlanir).
 		local newData = defaultData()
+		newData.vip = data.vip
+		newData.receipts = deepCopy(data.receipts)
+		newData.paid = deepCopy(data.paid)
+		for id in pairs(newData.paid) do
+			newData.up[id] = 1
+		end
 		session.data = newData
 		newData.run = startRun(newData, 4)
 		session.dirty = true
@@ -856,6 +1050,7 @@ end
 Players.PlayerRemoving:Connect(function(playerObj)
 	local session = sessions[playerObj]
 	sessions[playerObj] = nil
+	lastActTimes[playerObj] = nil   -- sizinti olmasin
 	if session then
 		pushBestToTop(playerObj, session)
 		saveSession(playerObj, session, true)
