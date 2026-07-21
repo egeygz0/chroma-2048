@@ -990,6 +990,24 @@ local shopModal = make("Frame", {
 }, container)
 corner(shopModal, BOARD_RADIUS)
 stroke(shopModal)
+
+-- Tiklama perdesi: Active = true bir Frame'de girdiyi guvenilir sekilde yutmuyor,
+-- GuiButton yutuyor. Bu olmadan modal acikken altindaki NEW / UNDO / SHOP / tema
+-- butonlari tiklanabiliyordu (yanlislikla tur bitirme riski).
+-- Boyut/konum UIPadding'i telafi eder: perde kenarlardaki 10 px seride de kapsar,
+-- yoksa modalin dis cercevesinden alttaki butonlara tiklanabiliyor
+make("TextButton", {
+	Name = "InputBlocker",
+	Position = UDim2.fromOffset(-10, -10),
+	Size = UDim2.new(1, 20, 1, 20),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	Selectable = false,
+	Active = true,
+	ZIndex = 20,
+}, shopModal)
+
 make("UIPadding", {
 	PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
 	PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
@@ -1136,8 +1154,7 @@ SET.button = make("TextButton", {
 corner(SET.button, TILE_RADIUS)
 stroke(SET.button)
 
--- Tam ekran perde: Active = true olmasi sart, yoksa tiklama altindaki
--- NEW / SHOP / tema butonlarina sizar ve turu yanlislikla bitirir
+-- Tam ekran perde
 SET.modal = make("Frame", {
 	Name = "SettingsModal",
 	Size = UDim2.fromScale(1, 1),
@@ -1147,6 +1164,19 @@ SET.modal = make("Frame", {
 	Visible = false,
 	ZIndex = 60,
 }, screenBg)
+
+-- Tiklama perdesi (shopModal ile ayni gerekce): Frame tek basina girdiyi
+-- guvenilir yutmuyor, alttaki header butonlari tiklanabiliyordu
+make("TextButton", {
+	Name = "InputBlocker",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	Selectable = false,
+	Active = true,
+	ZIndex = 60,
+}, SET.modal)
 
 SET.panel = make("Frame", {
 	Name = "Panel",
@@ -2376,6 +2406,7 @@ local function buildShopRows()
 					sizeButton.Activated:Connect(function()
 						S.shopOpen = false
 						shopModal.Visible = false
+						SET.button.Visible = true   -- modal kapandi, disli geri gelsin
 						requestNewGame(size)
 					end)
 				end
@@ -2655,16 +2686,22 @@ end)
 
 -- Header'daki SHOP / TOP 10 butonlari modali kendi sekmesinde acar;
 -- ayni sekme acikken tekrar basmak kapatir
+-- Disli butonu screenBg'nin cocugu, yani container'in (ve magaza modalinin)
+-- uzerinde ciziliyor. Modal acikken gizlenir ki uzerine binmesin.
+local function setShopOpen(open)
+	S.shopOpen = open
+	shopModal.Visible = open
+	SET.button.Visible = not open
+end
+
 local function toggleModal(tab)
 	if not S.loaded then return end
 	if S.shopOpen and shopTab == tab then
-		S.shopOpen = false
-		shopModal.Visible = false
+		setShopOpen(false)
 		return
 	end
 	shopTab = tab
-	S.shopOpen = true
-	shopModal.Visible = true
+	setShopOpen(true)
 	rebuildShop()
 end
 
@@ -2677,8 +2714,7 @@ topButton.Activated:Connect(function()
 end)
 
 closeButton.Activated:Connect(function()
-	S.shopOpen = false
-	shopModal.Visible = false
+	setShopOpen(false)
 end)
 
 -- ========================================================================
