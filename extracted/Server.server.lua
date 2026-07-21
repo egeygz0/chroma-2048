@@ -72,9 +72,33 @@ local SHOP = {
 	{ id = "undo",  max = 3, costs = { 150, 450, 1350 } },           -- run basina geri alma hakki
 	{ id = "coin",  max = 4, costs = { 300, 900, 2700, 8100 } },     -- coin kazanci +%25/sv
 	{ id = "grid5", max = 1, costs = { 5000 } },                     -- 5x5 tahta kilidi
+	{ id = "themeNeon",   max = 1, costs = { 1500 } },               -- kozmetik: Neon tema
+	{ id = "themeSunset", max = 1, costs = { 2500 } },               -- kozmetik: Sunset tema
 }
 local SHOP_BY_ID = {}
 for _, item in ipairs(SHOP) do SHOP_BY_ID[item.id] = item end
+
+-- Tema kilidi: Light/Dark herkeste acik, digerleri magazadan alinir
+local THEME_UNLOCK = { Neon = "themeNeon", Sunset = "themeSunset" }
+
+local function themeAllowed(data, name)
+	if name == "Light" or name == "Dark" then return true end
+	local req = THEME_UNLOCK[name]
+	return req ~= nil and (data.up[req] or 0) > 0
+end
+
+-- Gunluk odul: gun numarasi (UTC), art arda gunlerde artan coin
+local DAILY_BASE = 100
+local DAILY_STEP = 50
+local DAILY_MAX_STREAK = 7
+
+local function dayNumber()
+	return math.floor(os.time() / 86400)
+end
+
+local function dailyReward(streak)
+	return DAILY_BASE + DAILY_STEP * math.min(math.max(streak, 1) - 1, DAILY_MAX_STREAK - 1)
+end
 
 local function tileBonus(maxTile)
 	if maxTile >= 4096 then return 400
@@ -270,8 +294,18 @@ local function defaultData()
 		bestTile = 0,   -- oyuncunun tum zamanlarda ulastigi en yuksek tile
 		theme = "Light",
 		up = sanitizeUp(nil),
+		daily = { day = 0, streak = 0 },
 		run = nil,
 	}
+end
+
+local function sanitizeDaily(d)
+	local out = { day = 0, streak = 0 }
+	if type(d) == "table" then
+		out.day = sanitizeNumber(d.day, 10_000_000) or 0
+		out.streak = math.clamp(sanitizeNumber(d.streak, 10000) or 0, 0, 10000)
+	end
+	return out
 end
 
 local function startRun(data, size)
@@ -298,6 +332,7 @@ local function startRun(data, size)
 	return {
 		board = board, score = 0, seed = seed, spawns = spawns,
 		size = size, undoLeft = data.up.undo, won = false, over = false,
+		milestone = 0,   -- kutlanmis en yuksek esik (2048 / 4096 / 8192 ...)
 		prevBoard = nil, prevScore = 0,
 	}
 end
@@ -311,11 +346,14 @@ local function publicState(data)
 		bestTile = data.bestTile,
 		theme = data.theme,
 		up = deepCopy(data.up),
+		dailyReady = data.daily.day < dayNumber(),
+		dailyStreak = data.daily.streak,
+		dailyContinues = (data.daily.day == dayNumber() - 1),   -- seri kopmus mu
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
 			size = run.size, undoLeft = run.undoLeft,
-			won = run.won, over = run.over,
+			won = run.won, over = run.over, milestone = run.milestone,
 		} or nil,
 	}
 end
@@ -426,8 +464,10 @@ local function loadData(userId)
 					data.coins    = sanitizeNumber(result.coins, MAX_COINS) or 0
 					data.best     = sanitizeNumber(result.best, MAX_SCORE) or 0
 					data.bestTile = sanitizeNumber(result.bestTile, 1048576) or 0
-					data.theme = (result.theme == "Dark") and "Dark" or "Light"
 					data.up    = sanitizeUp(result.up)
+					data.daily = sanitizeDaily(result.daily)
+					data.theme = (type(result.theme) == "string" and themeAllowed(data, result.theme))
+						and result.theme or "Light"
 					local run = result.run
 					if type(run) == "table" then
 						local size = (run.size == 5) and 5 or 4
@@ -443,6 +483,10 @@ local function loadData(userId)
 								undoLeft = math.clamp(sanitizeNumber(run.undoLeft, 10) or 0, 0, SHOP_BY_ID.undo.max),
 								won = run.won == true,
 								over = run.over == true,
+								-- Eski kayitta milestone yok: tahtadaki en yuksek tile'i
+								-- kutlanmis say, yoksa 4096'ya ulasmis oyuncuya tekrar kutlama cikar
+								milestone = sanitizeNumber(run.milestone, 1048576)
+									or ((run.won == true) and boardMax(board, size) or 0),
 								prevBoard = nil, prevScore = 0,
 							}
 						end
@@ -461,6 +505,7 @@ local function loadData(userId)
 							spawns = 0, size = 4, undoLeft = 0,
 							won = boardMax(board, 4) >= 2048,
 							over = not hasMoves(board, 4),
+							milestone = (boardMax(board, 4) >= 2048) and boardMax(board, 4) or 0,
 							prevBoard = nil, prevScore = 0,
 						}
 					end
@@ -483,11 +528,12 @@ local function serializeData(data)
 		bestTile = data.bestTile,
 		theme = data.theme,
 		up = deepCopy(data.up),
+		daily = deepCopy(data.daily),
 		run = run and {
 			board = deepCopy(run.board),
 			score = run.score, seed = run.seed, spawns = run.spawns,
 			size = run.size, undoLeft = run.undoLeft,
-			won = run.won, over = run.over,
+			won = run.won, over = run.over, milestone = run.milestone,
 		} or nil,
 	}
 end
@@ -612,21 +658,19 @@ GetData.OnServerInvoke = function(playerObj)
 	return publicState(data)
 end
 
-MoveEvent.OnServerEvent:Connect(function(playerObj, dir)
-	local session = sessions[playerObj]
-	if not session or not session.loaded then return end
-	if type(dir) ~= "string" or not DIRECTIONS[dir] then return end
+-- Tek hamleyi isler; kutlanacak yeni esik varsa onu dondurur
+local function applyMove(playerObj, session, dir)
 	local data = session.data
 	local run = data.run
 	if not run or run.over then
 		SyncEvent:FireClient(playerObj, { ev = "resync", state = publicState(data) })
-		return
+		return false
 	end
 
 	local prevBoard = deepCopy(run.board)
 	local prevScore = run.score
 	local changed, gained = simMove(run.board, run.size, dir)
-	if not changed then return end
+	if not changed then return true end
 
 	run.prevBoard = prevBoard
 	run.prevScore = prevScore
@@ -639,10 +683,12 @@ MoveEvent.OnServerEvent:Connect(function(playerObj, dir)
 	if maxTile > data.bestTile then
 		data.bestTile = maxTile
 	end
-	local justWon = false
-	if not run.won and maxTile >= 2048 then
+	-- Kilometre taslari: 2048 ve sonraki her katta bir kez kutlanir
+	local newMilestone = nil
+	if maxTile >= 2048 and maxTile > run.milestone then
+		run.milestone = maxTile
 		run.won = true
-		justWon = true
+		newMilestone = maxTile
 	end
 
 	if not hasMoves(run.board, run.size) then
@@ -652,10 +698,50 @@ MoveEvent.OnServerEvent:Connect(function(playerObj, dir)
 		SyncEvent:FireClient(playerObj, {
 			ev = "over", earned = earned, coins = data.coins, best = data.best,
 		})
-	elseif justWon then
+		return false
+	elseif newMilestone then
 		SyncEvent:FireClient(playerObj, {
-			ev = "win", coins = data.coins, best = data.best,
+			ev = "win", tile = newMilestone, coins = data.coins, best = data.best,
 		})
+	end
+	return true
+end
+
+-- Istemci hamleleri paket halinde gonderir (tek yon ya da yon dizisi).
+-- Token bucket ile hiz siniri: sn'de 15 hamle, en fazla 30 birikimli.
+local MOVE_RATE = 15
+local MOVE_BURST = 30
+local MAX_MOVES_PER_PACKET = 8
+
+MoveEvent.OnServerEvent:Connect(function(playerObj, payload)
+	local session = sessions[playerObj]
+	if not session or not session.loaded then return end
+
+	local dirs
+	if type(payload) == "string" then
+		dirs = { payload }
+	elseif type(payload) == "table" then
+		dirs = payload
+	else
+		return
+	end
+
+	local now = os.clock()
+	session.moveBudget = math.min(MOVE_BURST,
+		(session.moveBudget or MOVE_BURST) + (now - (session.lastMoveAt or now)) * MOVE_RATE)
+	session.lastMoveAt = now
+
+	local count = math.min(#dirs, MAX_MOVES_PER_PACKET)
+	for i = 1, count do
+		local dir = dirs[i]
+		if type(dir) ~= "string" or not DIRECTIONS[dir] then return end
+		if session.moveBudget < 1 then
+			-- Hiz siniri asildi: kalan hamleler yok sayilir, istemci tam durumla eslenir
+			SyncEvent:FireClient(playerObj, { ev = "resync", state = publicState(session.data) })
+			return
+		end
+		session.moveBudget -= 1
+		if not applyMove(playerObj, session, dir) then return end
 	end
 end)
 
@@ -713,23 +799,53 @@ Act.OnServerInvoke = function(playerObj, req)
 		return { ok = true, coins = data.coins, up = deepCopy(data.up) }
 
 	elseif a == "theme" then
-		if req.t == "Light" or req.t == "Dark" then
+		if type(req.t) == "string" and themeAllowed(data, req.t) then
 			data.theme = req.t
 			session.dirty = true
 			return { ok = true }
 		end
 		return { ok = false, err = "bad_theme" }
 
+	elseif a == "daily" then
+		local today = dayNumber()
+		if data.daily.day >= today then
+			return { ok = false, err = "claimed" }
+		end
+		-- Art arda gun ise seri artar, kopmussa bastan baslar
+		data.daily.streak = (data.daily.day == today - 1) and (data.daily.streak + 1) or 1
+		data.daily.day = today
+		local reward = dailyReward(data.daily.streak)
+		data.coins = math.min(data.coins + reward, MAX_COINS)
+		session.dirty = true
+		return { ok = true, reward = reward, streak = data.daily.streak, coins = data.coins }
+
+	elseif a == "wipe" then
+		-- Tum ilerlemeyi siler; istemci iki asamali onay ister
+		local newData = defaultData()
+		session.data = newData
+		newData.run = startRun(newData, 4)
+		session.dirty = true
+		session.topWritten = 0
+		session.tileWritten = 0
+		saveSession(playerObj, session, true)
+		-- Siralamalardan da dus, yoksa kisisel best 0 iken tabloda eski skor kalir
+		task.spawn(function()
+			pcall(function() topStore:RemoveAsync(tostring(playerObj.UserId)) end)
+			pcall(function() tileStore:RemoveAsync(tostring(playerObj.UserId)) end)
+		end)
+		return { ok = true, state = publicState(newData) }
+
 	elseif a == "top" then
 		local kind = (req.board == "tile") and "tile" or "score"
-		local cache = fetchTop(kind)
+		local cache = fetchTop(kind)   -- yield eder; sonrasinda veriyi taze oku
+		local fresh = session.data
 		return {
 			ok = true,
 			list = cache.list,
 			me = {
 				rank = cache.ranks[playerObj.UserId],   -- o sekmenin ilk 100'unde degilse nil
-				best = data.best,
-				tile = data.bestTile,
+				best = fresh.best,
+				tile = fresh.bestTile,
 			},
 		}
 	end

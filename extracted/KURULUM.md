@@ -1,4 +1,16 @@
-# Neon Merge 2048 v3.3 — Kurulum ve Rehber
+# Neon Merge 2048 v4 — Kurulum ve Rehber
+
+## v4'te Yeni
+
+- **Günlük ödül:** günde bir kez alınır, art arda günlerde seri büyür (100 coin taban, gün başına +50, 7. günde tavan 400). Sunucu UTC gün numarasıyla doğrular, çift alım mümkün değil.
+- **Kilometre taşları:** 2048'den sonra 4096, 8192... her yeni eşik bir kez kutlanır (önceden yalnızca 2048 vardı). Continue ile tur sürer.
+- **Kozmetik temalar:** Neon (1500 coin) ve Sunset (2500 coin) mağazadan açılır; tema butonu açık temalar arasında döner. Light/Dark herkeste açık.
+- **Veri sıfırlama:** SHOP'un altında çift onaylı `RESET ALL DATA`. Coin, best, upgrade ve tur sıfırlanır; oyuncu her iki leaderboard'dan da düşer.
+- **Mobil/dar ekran düzeni:** header butonları ve başlık genişliğe göre küçülür, 330px altında TOP 10 kısalır. Ekran boyutu değişince otomatik yeniden hesaplanır.
+- **Hamle paketleme:** ilk hamle anında gider, 0.2 sn penceresindeki arka arkaya hamleler tek pakette birleşir. Sunucuda token bucket hız sınırı (15/sn, 30 burst) ve paket başına en fazla 8 hamle.
+- **Ses altyapısı:** dosyanın başındaki `SOUND_IDS` tablosuna asset ID yapıştırılınca ilgili ses çalar (`move`, `merge`, `buy`, `gameOver`, `milestone`, `daily`). `0` bırakılan ses çalmaz, hata vermez.
+
+# Neon Merge 2048 v3.3
 
 ## v3.3'te Yeni: Veri Kaybı Koruması + Hızlı Açılış
 

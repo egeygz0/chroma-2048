@@ -89,7 +89,37 @@ local THEMES = {
 		stroke     = hex("3A3A40"),
 		strokeT    = 0.2,
 	},
+	-- Kozmetik temalar (magazadan acilir)
+	Neon = {
+		screen     = hex("0A0A12"),
+		board      = hex("14142A"),
+		empty      = hex("1E1E3C"),
+		text       = hex("E8E8FF"),
+		button     = hex("1E1E3C"),
+		buttonText = hex("E8E8FF"),
+		statValue  = hex("E8E8FF"),
+		statLabel  = hex("8888BB"),
+		stroke     = hex("00E5FF"),
+		strokeT    = 0.45,
+	},
+	Sunset = {
+		screen     = hex("2B1B2E"),
+		board      = hex("3D2438"),
+		empty      = hex("5C3448"),
+		text       = hex("FFE8D6"),
+		button     = hex("3D2438"),
+		buttonText = hex("FFE8D6"),
+		statValue  = hex("FFE8D6"),
+		statLabel  = hex("C89B8C"),
+		stroke     = hex("FF8C42"),
+		strokeT    = 0.35,
+	},
 }
+
+-- Tema sirasi ve kilidi (sunucudaki THEME_UNLOCK ile ayni tutulmali)
+local THEME_ORDER = { "Light", "Dark", "Neon", "Sunset" }
+local THEME_UNLOCK = { Neon = "themeNeon", Sunset = "themeSunset" }
+local THEME_ICON = { Light = "☀️", Dark = "🌙", Neon = "💡", Sunset = "🌇" }
 
 local TILE_COLORS = {
 	[2]    = hex("FFD700"),
@@ -127,7 +157,43 @@ local SHOP = {
 	  name = "Coin Rush", desc = "+25% coins earned per level" },
 	{ id = "grid5", max = 1, costs = { 5000 },
 	  name = "5x5 Board", desc = "Unlock the big board (switch in shop)" },
+	{ id = "themeNeon", max = 1, costs = { 1500 },
+	  name = "Neon Theme", desc = "Cosmetic: deep blue neon palette" },
+	{ id = "themeSunset", max = 1, costs = { 2500 },
+	  name = "Sunset Theme", desc = "Cosmetic: warm dusk palette" },
 }
+
+-- ========================================================================
+-- SES: asset ID'leri buraya yapistir (0 birakilan ses calmaz)
+-- ========================================================================
+local SOUND_IDS = {
+	move     = 0,   -- her gecerli hamle
+	merge    = 0,   -- birlestirme
+	buy      = 0,   -- magaza satin alma
+	gameOver = 0,   -- tur bitti
+	milestone= 0,   -- 2048 / 4096 / 8192 kutlamasi
+	daily    = 0,   -- gunluk odul
+}
+local SOUND_VOLUME = 0.5
+
+local sounds = {}
+local function initSounds(parent)
+	for name, id in pairs(SOUND_IDS) do
+		if id ~= 0 then
+			local s = Instance.new("Sound")
+			s.Name = "SFX_" .. name
+			s.SoundId = "rbxassetid://" .. id
+			s.Volume = SOUND_VOLUME
+			s.Parent = parent
+			sounds[name] = s
+		end
+	end
+end
+
+local function playSound(name)
+	local s = sounds[name]
+	if s then s:Play() end
+end
 
 local function tileBonus(maxTile)
 	if maxTile >= 4096 then return 400
@@ -282,7 +348,8 @@ local S = {
 	loaded = false, busy = false, shopOpen = false,
 	size = 4, board = nil, score = 0, best = 0, coins = 0,
 	seed = 1, spawns = 0, undoLeft = 0, won = false, over = false,
-	up = { spawn = 0, start = 0, undo = 0, coin = 0, grid5 = 0 },
+	milestone = 0, dailyReady = false, dailyStreak = 0, dailyContinues = false,
+	up = { spawn = 0, start = 0, undo = 0, coin = 0, grid5 = 0, themeNeon = 0, themeSunset = 0 },
 }
 local currentTheme = "Light"
 
@@ -401,8 +468,50 @@ local shopButton  = headerButton("Shop", "SHOP", 62, -128)
 local newButton   = headerButton("NewGame", "NEW", 56, -196)
 local undoButton  = headerButton("Undo", "UNDO 0", 76, -258)
 undoButton.Visible = false
-undoButton.TextSize = 14
-topButton.TextSize = 14
+
+-- Duyarli header: dar ekranda butonlar ve baslik kuculur, TOP 10 kisalir.
+-- Butonlar sagdan sola dizildigi icin genislikler kumulatif hesaplanir.
+local function layoutHeader()
+	local width = container.AbsoluteSize.X
+	if width <= 0 then return end
+	local compact = width < 400
+	local tiny = width < 330
+
+	local themeW = compact and 40 or 48
+	local topW   = tiny and 44 or (compact and 56 or 68)
+	local shopW  = compact and 52 or 62
+	local newW   = compact and 46 or 56
+	local undoW  = compact and 62 or 76
+	local gap    = compact and 5 or 6
+	local fontSize = compact and 13 or 16
+	local height = compact and 38 or 44
+
+	topButton.Text = tiny and "TOP" or "TOP 10"
+
+	local offset = 0
+	for _, entry in ipairs({
+		{ themeButton, themeW }, { topButton, topW }, { shopButton, shopW },
+		{ newButton, newW }, { undoButton, undoW },
+	}) do
+		local button, w = entry[1], entry[2]
+		button.Size = UDim2.fromOffset(w, height)
+		button.Position = UDim2.new(1, -offset, 0.5, 0)
+		offset += w + gap
+	end
+	themeButton.TextSize = compact and 18 or 22
+	for _, b in ipairs({ topButton, shopButton, newButton }) do
+		b.TextSize = fontSize
+	end
+	undoButton.TextSize = fontSize - 2
+
+	-- Baslik, buton kumesinden arta kalan alani kullanir
+	local used = themeW + topW + shopW + newW + gap * 3
+	if undoButton.Visible then used += undoW + gap end
+	title.Size = UDim2.new(1, -(used + 12), 1, 0)
+end
+
+layoutHeader()
+container:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutHeader)
 
 -- Header satir 2: SCORE / BEST / COINS
 local headerStats = make("Frame", {
@@ -631,6 +740,58 @@ local primaryButton   = overlayButton("Primary", "New Game", 0.62, ACCENT)
 local secondaryButton = overlayButton("Secondary", "Continue", 0.75, hex("00C853"))
 secondaryButton.Visible = false
 
+-- Gunluk odul katmani (tahtanin ustunde, yukleme bitince gosterilir)
+local dailyLayer = make("Frame", {
+	Name = "DailyLayer",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.fromRGB(15, 15, 15),
+	BackgroundTransparency = 0.25,
+	Visible = false,
+	ZIndex = 12,
+}, board)
+corner(dailyLayer, BOARD_RADIUS)
+
+local dailyTitle = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.32),
+	Size = UDim2.fromScale(0.85, 0.16),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	Text = "Daily Bonus",
+	TextColor3 = WHITE_TEXT,
+	TextScaled = true,
+	ZIndex = 13,
+}, dailyLayer)
+make("UITextSizeConstraint", { MaxTextSize = 34 }, dailyTitle)
+
+local dailySub = make("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.48),
+	Size = UDim2.fromScale(0.85, 0.12),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "",
+	TextColor3 = hex("FFD700"),
+	TextScaled = true,
+	ZIndex = 13,
+}, dailyLayer)
+make("UITextSizeConstraint", { MaxTextSize = 20 }, dailySub)
+
+local dailyButton = make("TextButton", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.66),
+	Size = UDim2.new(0.5, 0, 0, 42),
+	BackgroundColor3 = hex("00C853"),
+	Font = Enum.Font.GothamBold,
+	Text = "Claim",
+	TextColor3 = WHITE_TEXT,
+	TextSize = 18,
+	AutoButtonColor = true,
+	BorderSizePixel = 0,
+	ZIndex = 13,
+}, dailyLayer)
+corner(dailyButton, TILE_RADIUS)
+
 -- Magaza / leaderboard modali
 local shopModal = make("Frame", {
 	Name = "ShopModal",
@@ -790,13 +951,31 @@ local function applyTheme(name)
 			tween(cells[r][c].frame, { BackgroundColor3 = t.empty })
 		end
 	end
-	themeButton.Text = (name == "Light") and "🌙" or "☀️"
+	themeButton.Text = THEME_ICON[name] or "☀️"
+end
+
+-- Acik temalar: Light/Dark her zaman, digerleri magazadan alinmissa
+local function unlockedThemes()
+	local list = {}
+	for _, name in ipairs(THEME_ORDER) do
+		local req = THEME_UNLOCK[name]
+		if not req or (S.up[req] or 0) > 0 then
+			table.insert(list, name)
+		end
+	end
+	return list
 end
 
 themeButton.Activated:Connect(function()
 	if not S.loaded then return end   -- yukleme bitmeden secim sunucuda kaydedilemez
-	applyTheme(currentTheme == "Light" and "Dark" or "Light")
-	task.spawn(act, { a = "theme", t = currentTheme })
+	local list = unlockedThemes()
+	local index = 1
+	for i, name in ipairs(list) do
+		if name == currentTheme then index = i break end
+	end
+	local nextTheme = list[(index % #list) + 1]
+	applyTheme(nextTheme)
+	task.spawn(act, { a = "theme", t = nextTheme })
 end)
 
 -- ========================================================================
@@ -819,8 +998,7 @@ local function updateHUD()
 	coinValue.Text = tostring(S.coins)
 	undoButton.Text = "UNDO " .. S.undoLeft
 	undoButton.Visible = (S.up.undo > 0)
-	-- UNDO gorununce baslik alani daralir, buton kumesine tasmaz
-	title.Size = UDim2.new(1, undoButton.Visible and -344 or -266, 1, 0)
+	layoutHeader()   -- UNDO gorunurlugu degisince baslik alani yeniden hesaplanir
 end
 
 local function render(popSet)
@@ -912,6 +1090,40 @@ end)
 -- ========================================================================
 -- 7. GAME FLOW
 -- ========================================================================
+-- Hamle paketleme: ilk hamle aninda gider (gecikme yok), pencere icindeki
+-- arka arkaya hamleler tek pakette birlesir. Sira korundugu icin sunucu
+-- simulasyonu istemciyle birebir ayni kalir.
+local moveQueue = {}
+local moveFlushScheduled = false
+local lastFlushAt = -math.huge
+local MOVE_FLUSH_WINDOW = 0.2
+
+local function flushMoves()
+	moveFlushScheduled = false
+	if #moveQueue == 0 then return end
+	local batch = moveQueue
+	moveQueue = {}
+	lastFlushAt = os.clock()
+	MoveEvent:FireServer(batch)
+end
+
+local function queueMove(dir)
+	table.insert(moveQueue, dir)
+	local sinceFlush = os.clock() - lastFlushAt
+	if sinceFlush >= MOVE_FLUSH_WINDOW then
+		flushMoves()
+	elseif not moveFlushScheduled then
+		moveFlushScheduled = true
+		task.delay(MOVE_FLUSH_WINDOW - sinceFlush, flushMoves)
+	end
+end
+
+-- Sunucu tam durum gonderdiginde bekleyen hamleler gecersizdir
+local function dropQueuedMoves()
+	moveQueue = {}
+	moveFlushScheduled = false
+end
+
 local function showOver(earned)
 	overTitle.Text = "Game Over"
 	-- earned nil ise (resync yolu) odul metni gosterilmez; kesin degeri NM_Sync yazar
@@ -921,9 +1133,9 @@ local function showOver(earned)
 	overlay.Visible = true
 end
 
-local function showWin()
-	overTitle.Text = "2048!"
-	overSub.Text = "You reached 2048, keep going!"
+local function showWin(tile)
+	overTitle.Text = tostring(tile or 2048) .. "!"
+	overSub.Text = "Milestone reached, keep going!"
 	primaryButton.Text = "New Game"
 	secondaryButton.Visible = true
 	overlay.Visible = true
@@ -932,9 +1144,13 @@ end
 -- Sunucudan gelen tam durumu uygula
 local function applyState(state, earned)
 	if type(state) ~= "table" then return end
+	dropQueuedMoves()   -- sunucu durumu otorite; bekleyen hamleler uygulanmamali
 	S.coins = state.coins or S.coins
 	S.best = state.best or S.best
 	S.up = state.up or S.up
+	if state.dailyReady ~= nil then S.dailyReady = state.dailyReady end
+	if state.dailyStreak ~= nil then S.dailyStreak = state.dailyStreak end
+	if state.dailyContinues ~= nil then S.dailyContinues = state.dailyContinues end
 	if state.theme and state.theme ~= currentTheme then
 		applyTheme(state.theme)
 	end
@@ -951,6 +1167,7 @@ local function applyState(state, earned)
 		S.undoLeft = run.undoLeft
 		S.won = run.won
 		S.over = run.over
+		S.milestone = run.milestone or (run.won and 2048 or 0)
 	end
 	overlay.Visible = false
 	if S.over then
@@ -962,6 +1179,7 @@ end
 local function requestNewGame(size)
 	if not S.loaded or S.busy then return end
 	S.busy = true
+	flushMoves()   -- bekleyen hamleler yeni turdan once islenmelidir
 	local req = size and { a = "grid", size = size } or { a = "new" }
 	local res = act(req)
 	if res and res.ok then
@@ -973,6 +1191,7 @@ end
 local function requestUndo()
 	if not S.loaded or S.busy or S.over or S.undoLeft < 1 then return end
 	S.busy = true
+	flushMoves()   -- undo, sunucudaki son hamlenin snapshot'ini geri alir
 	local res = act({ a = "undo" })
 	if res and res.ok then
 		applyState(res.state)
@@ -981,8 +1200,9 @@ local function requestUndo()
 end
 
 local function doMove(dir)
-	-- overlay.Visible: win ekrani acikken de hamle kilitli (Continue/New Game beklenir)
-	if not S.loaded or S.busy or S.over or S.shopOpen or overlay.Visible then return end
+	-- overlay/dailyLayer acikken hamle kilitli (Continue/New Game/Claim beklenir)
+	if not S.loaded or S.busy or S.over or S.shopOpen then return end
+	if overlay.Visible or dailyLayer.Visible then return end
 	local changed, gained, anims, popSet = simMove(S.board, S.size, dir)
 	if not changed then return end
 	S.busy = true
@@ -990,27 +1210,31 @@ local function doMove(dir)
 	local sr, sc = spawnTile(S.board, S.size, S.seed, S.spawns, S.up.spawn)
 	S.spawns += 1
 	if sr then popSet[sr .. "_" .. sc] = true end
-	MoveEvent:FireServer(dir)
-	if S.undoLeft > 0 then
-		-- sunucuda snapshot olustu; buton aktif kalir
-	end
-	local justWon = false
-	if not S.won and boardMax(S.board, S.size) >= 2048 then
+	queueMove(dir)
+	playSound((gained > 0) and "merge" or "move")
+
+	local maxTile = boardMax(S.board, S.size)
+	local newMilestone = nil
+	if maxTile >= 2048 and maxTile > S.milestone then
+		S.milestone = maxTile
 		S.won = true
-		justWon = true
+		newMilestone = maxTile
 	end
 	playSlide(anims, function()
 		render(popSet)
-		if justWon then
-			showWin()
+		if newMilestone then
+			showWin(newMilestone)
+			playSound("milestone")
 		end
 		if not hasMoves(S.board, S.size) then
 			S.over = true
 			-- Odul metni lokal formulle aninda gosterilir; coin bakiyesini
 			-- YALNIZCA sunucu gunceller (NM_Sync "over"), cift sayim olmaz
-			local earned = coinsForRun(S.score, boardMax(S.board, S.size), S.up.coin)
+			local earned = coinsForRun(S.score, maxTile, S.up.coin)
 			updateHUD()
 			showOver(earned)
+			playSound("gameOver")
+			flushMoves()   -- bekleyen hamleleri hemen gonder, sunucu turu kapatabilsin
 		end
 		task.delay(MOVE_DEBOUNCE - SLIDE_TIME, function()
 			S.busy = false
@@ -1033,6 +1257,50 @@ end)
 
 undoButton.Activated:Connect(requestUndo)
 
+-- Gunluk odul: yukleme bitince hak varsa gosterilir, Claim sunucuda dogrulanir
+local function showDaily()
+	if not S.dailyReady then return end
+	-- Seri koptuysa sunucu 1'den baslatir; onizleme bunu yansitmali
+	local nextStreak = S.dailyContinues and ((S.dailyStreak or 0) + 1) or 1
+	dailySub.Text = "Day " .. nextStreak .. " streak"
+	dailyButton.Text = "Claim"
+	dailyButton.Active = true
+	dailyLayer.Visible = true
+end
+
+dailyButton.Activated:Connect(function()
+	if not S.loaded then return end
+	if not S.dailyReady then
+		dailyLayer.Visible = false   -- odul alinmis, buton "Play" gorevinde
+		return
+	end
+	dailyButton.Active = false
+	local res = act({ a = "daily" })
+	if res and res.ok then
+		S.coins = res.coins or S.coins
+		S.dailyStreak = res.streak or S.dailyStreak
+		S.dailyReady = false
+		updateHUD()
+		playSound("daily")
+		dailyTitle.Text = "+" .. (res.reward or 0) .. " COINS"
+		dailySub.Text = "Come back tomorrow"
+		dailyButton.Text = "Play"
+		dailyButton.Active = true
+		task.delay(1.2, function()
+			dailyLayer.Visible = false
+			dailyTitle.Text = "Daily Bonus"
+		end)
+	elseif res and res.err == "claimed" then
+		-- Baska bir oturumda alinmis: kapat
+		S.dailyReady = false
+		dailyLayer.Visible = false
+	else
+		-- Gecici hata (sunucu hazir degil vb.): hak yanmasin, tekrar denenebilsin
+		dailyButton.Active = true
+		dailySub.Text = "Try again"
+	end
+end)
+
 SyncEvent.OnClientEvent:Connect(function(p)
 	if type(p) ~= "table" then return end
 	if p.ev == "over" then
@@ -1045,6 +1313,7 @@ SyncEvent.OnClientEvent:Connect(function(p)
 	elseif p.ev == "win" then
 		S.coins = p.coins or S.coins
 		S.best = math.max(S.best, p.best or 0)
+		if p.tile and p.tile > S.milestone then S.milestone = p.tile end
 		updateHUD()
 	elseif p.ev == "resync" then
 		applyState(p.state)
@@ -1141,6 +1410,9 @@ local function buildShopRows()
 				priceLabel.TextColor3 = hex("9A968F")
 			end
 			buyButton.Activated:Connect(function()
+				-- Bekleyen hamle satin almadan once islenmelidir: spawn seviyesi
+				-- degisirse sunucu ve istemci farkli tile uretir
+				flushMoves()
 				local res = act({ a = "buy", id = item.id })
 				if res and res.ok then
 					S.coins = res.coins
@@ -1148,6 +1420,7 @@ local function buildShopRows()
 					if item.id == "undo" and not S.over then
 						S.undoLeft += 1
 					end
+					playSound("buy")
 					updateHUD()
 					rebuildShop()
 				end
@@ -1191,6 +1464,52 @@ local function buildShopRows()
 			requestNewGame(target)
 		end)
 	end
+
+	-- Veri sifirlama: cift onayli, geri alinamaz
+	local resetRow = shopRow(56)
+	local resetButton = make("TextButton", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, -20, 0, 36),
+		BackgroundColor3 = hex("5C3448"),
+		Font = Enum.Font.GothamBold,
+		Text = "RESET ALL DATA",
+		TextColor3 = hex("FFB3B3"),
+		TextSize = 13,
+		AutoButtonColor = true,
+		BorderSizePixel = 0,
+		ZIndex = 22,
+	}, resetRow)
+	corner(resetButton, TILE_RADIUS)
+
+	local resetArmed = false
+	resetButton.Activated:Connect(function()
+		if not S.loaded then return end
+		if not resetArmed then
+			resetArmed = true
+			resetButton.Text = "TAP AGAIN TO CONFIRM"
+			resetButton.BackgroundColor3 = hex("D32F2F")
+			resetButton.TextColor3 = WHITE_TEXT
+			task.delay(4, function()
+				if resetArmed and resetButton.Parent then
+					resetArmed = false
+					resetButton.Text = "RESET ALL DATA"
+					resetButton.BackgroundColor3 = hex("5C3448")
+					resetButton.TextColor3 = hex("FFB3B3")
+				end
+			end)
+			return
+		end
+		resetArmed = false
+		flushMoves()
+		local res = act({ a = "wipe" })
+		if res and res.ok then
+			applyTheme("Light")
+			applyState(res.state)
+			S.shopOpen = false
+			shopModal.Visible = false
+		end
+	end)
 end
 
 local function buildTopRows()
@@ -1431,6 +1750,8 @@ task.spawn(function()
 			applyState(state)
 			S.loaded = true
 			hideLoading()
+			initSounds(gui)
+			showDaily()
 		else
 			if os.clock() - startedAt >= 4 then
 				setLoading("Save server unavailable\nRetrying...")
