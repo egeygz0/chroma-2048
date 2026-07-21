@@ -109,16 +109,17 @@ local function textColorFor(bg)
 end
 
 -- MAGAZA KATALOGU (sunucuyla birebir ayni tutulmali; metinler yalnizca istemcide)
+-- Fiyatlar seviye basina ~2.5x katlanir (sunucuyla birebir ayni tutulmali)
 local SHOP = {
-	{ id = "spawn", max = 5, costs = { 50, 100, 200, 400, 800 },
+	{ id = "spawn", max = 5, costs = { 75, 190, 470, 1200, 3000 },
 	  name = "Lucky Spawns", desc = "+10% chance of 4s per level, 8s at Lv4+" },
-	{ id = "start", max = 3, costs = { 150, 400, 1000 },
+	{ id = "start", max = 3, costs = { 250, 750, 2250 },
 	  name = "Head Start", desc = "Start each run with a bonus tile (8/16/32)" },
-	{ id = "undo",  max = 3, costs = { 100, 300, 700 },
+	{ id = "undo",  max = 3, costs = { 150, 450, 1350 },
 	  name = "Undo", desc = "+1 undo per run per level" },
-	{ id = "coin",  max = 4, costs = { 200, 500, 1200, 2500 },
+	{ id = "coin",  max = 4, costs = { 300, 900, 2700, 8100 },
 	  name = "Coin Rush", desc = "+25% coins earned per level" },
-	{ id = "grid5", max = 1, costs = { 3000 },
+	{ id = "grid5", max = 1, costs = { 5000 },
 	  name = "5x5 Board", desc = "Unlock the big board (switch in shop)" },
 }
 
@@ -132,7 +133,7 @@ local function tileBonus(maxTile)
 end
 
 local function coinsForRun(score, maxTile, coinLv)
-	local base = math.floor(score / 100) + tileBonus(maxTile)
+	local base = math.floor(score / 200) + tileBonus(maxTile)
 	return math.floor(base * (1 + 0.25 * coinLv))
 end
 

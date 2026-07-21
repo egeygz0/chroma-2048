@@ -36,17 +36,19 @@ local store    = DataStoreService:GetDataStore(STORE_NAME)
 local topStore = DataStoreService:GetOrderedDataStore(TOP_STORE_NAME)
 
 -- 3D karakter tamamen kapali: oyun saf 2D ScreenGui, avatar hic dogmaz
-Players.CharacterAutoSpawn = false
+-- (dogru ozellik adi CharacterAutoLoads; CharacterAutoSpawn diye ozellik yok)
+Players.CharacterAutoLoads = false
 
 -- ========================================================================
 -- MAGAZA KATALOGU (istemciyle birebir ayni tutulmali)
 -- ========================================================================
+-- Fiyatlar seviye basina ~2.5x katlanir (uzun vadeli meta hedefi)
 local SHOP = {
-	{ id = "spawn", max = 5, costs = { 50, 100, 200, 400, 800 } },   -- 4 sansi +%10/sv, sv4+ 8 sansi
-	{ id = "start", max = 3, costs = { 150, 400, 1000 } },           -- run basi hazir tile 8/16/32
-	{ id = "undo",  max = 3, costs = { 100, 300, 700 } },            -- run basina geri alma hakki
-	{ id = "coin",  max = 4, costs = { 200, 500, 1200, 2500 } },     -- coin kazanci +%25/sv
-	{ id = "grid5", max = 1, costs = { 3000 } },                     -- 5x5 tahta kilidi
+	{ id = "spawn", max = 5, costs = { 75, 190, 470, 1200, 3000 } }, -- 4 sansi +%10/sv, sv4+ 8 sansi
+	{ id = "start", max = 3, costs = { 250, 750, 2250 } },           -- run basi hazir tile 8/16/32
+	{ id = "undo",  max = 3, costs = { 150, 450, 1350 } },           -- run basina geri alma hakki
+	{ id = "coin",  max = 4, costs = { 300, 900, 2700, 8100 } },     -- coin kazanci +%25/sv
+	{ id = "grid5", max = 1, costs = { 5000 } },                     -- 5x5 tahta kilidi
 }
 local SHOP_BY_ID = {}
 for _, item in ipairs(SHOP) do SHOP_BY_ID[item.id] = item end
@@ -61,7 +63,7 @@ local function tileBonus(maxTile)
 end
 
 local function coinsForRun(score, maxTile, coinLv)
-	local base = math.floor(score / 100) + tileBonus(maxTile)
+	local base = math.floor(score / 200) + tileBonus(maxTile)
 	return math.floor(base * (1 + 0.25 * coinLv))
 end
 

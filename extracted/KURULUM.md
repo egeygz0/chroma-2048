@@ -17,16 +17,16 @@
 ## v3'te Yeni: SUNUCU-OTORİTER ÇEKİRDEK + COIN EKONOMİSİ
 
 - **Oyun mantığı artık sunucuda simüle edilir.** İstemci yalnızca hamle yönü gönderir (`NM_Move`); slide/merge/spawn/skor/coin sunucuda işlenir. İstemci aynı simülasyonu görsel için lokal oynatır; spawn deterministiktir (`Random.new(seed + spawnIndex * 7919)`), iki taraf aynı seed ve sayaçla aynı sonucu üretir. Exploiter'ın skor/coin beyan etme yolu yoktur.
-- **Coin sistemi:** tur bitince (game over veya elle yeni oyun) `coin = floor(skor/100) + en yüksek tile bonusu` (256:+10, 512:+25, 1024:+60, 2048:+150, 4096:+400), Coin Rush çarpanıyla ölçeklenir. Ödülü sunucu hesaplar.
-- **Mağaza (SHOP butonu):**
+- **Coin sistemi:** tur bitince (game over veya elle yeni oyun) `coin = floor(skor/200) + en yüksek tile bonusu` (256:+10, 512:+25, 1024:+60, 2048:+150, 4096:+400), Coin Rush çarpanıyla ölçeklenir. Ödülü sunucu hesaplar.
+- **Mağaza (SHOP butonu):** fiyatlar seviye başına ~2.5x katlanır:
 
 | Upgrade | Maks | Fiyatlar | Etki |
 |---|---|---|---|
-| Lucky Spawns | 5 | 50/100/200/400/800 | 4 gelme şansı +%10/sv; sv4+ 8 şansı (%5/sv) |
-| Head Start | 3 | 150/400/1000 | Her tur 8/16/32'lik hazır tile ile başlar |
-| Undo | 3 | 100/300/700 | Tur başına +1 geri alma hakkı |
-| Coin Rush | 4 | 200/500/1200/2500 | Coin kazancı +%25/sv |
-| 5x5 Board | 1 | 3000 | 5x5 tahta kilidi; mağazadan 4x4/5x5 geçişi (geçiş yeni tur başlatır) |
+| Lucky Spawns | 5 | 75/190/470/1200/3000 | 4 gelme şansı +%10/sv; sv4+ 8 şansı (%5/sv) |
+| Head Start | 3 | 250/750/2250 | Her tur 8/16/32'lik hazır tile ile başlar |
+| Undo | 3 | 150/450/1350 | Tur başına +1 geri alma hakkı |
+| Coin Rush | 4 | 300/900/2700/8100 | Coin kazancı +%25/sv |
+| 5x5 Board | 1 | 5000 | 5x5 tahta kilidi; mağazadan 4x4/5x5 geçişi (geçiş yeni tur başlatır) |
 
 - **Undo:** UNDO butonu (hak varsa görünür), son hamleyi sunucudan geri alır (tek adım, spawn dahil).
 - **Mobil destek:** dokunmatik swipe ile oynanır (`TouchSwipe`).
