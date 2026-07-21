@@ -171,9 +171,9 @@ local SHOP = {
 	  name = "Coin Rush", desc = "+25% coins earned per level" },
 	{ id = "grid5", max = 2, costs = { 5000, 20000 },
 	  name = "Bigger Board", desc = "Lv1 unlocks 5x5, Lv2 unlocks 6x6 (switch in shop)" },
-	{ id = "themeNeon", max = 1, costs = { 1500 },
+	{ id = "themeNeon", max = 1, costs = { 15000 },
 	  name = "Neon Theme", desc = "Cosmetic: deep blue neon palette" },
-	{ id = "themeSunset", max = 1, costs = { 2500 },
+	{ id = "themeSunset", max = 1, costs = { 25000 },
 	  name = "Sunset Theme", desc = "Cosmetic: warm dusk palette" },
 }
 

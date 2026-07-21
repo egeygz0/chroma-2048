@@ -87,8 +87,8 @@ local SHOP = {
 	{ id = "undo",  max = 3, costs = { 150, 450, 1350 } },           -- run basina geri alma hakki
 	{ id = "coin",  max = 4, costs = { 300, 900, 2700, 8100 } },     -- coin kazanci +%25/sv
 	{ id = "grid5", max = 2, costs = { 5000, 20000 } },              -- sv1: 5x5, sv2: 6x6
-	{ id = "themeNeon",   max = 1, costs = { 1500 } },               -- kozmetik: Neon tema
-	{ id = "themeSunset", max = 1, costs = { 2500 } },               -- kozmetik: Sunset tema
+	{ id = "themeNeon",   max = 1, costs = { 15000 } },              -- kozmetik: Neon tema
+	{ id = "themeSunset", max = 1, costs = { 25000 } },              -- kozmetik: Sunset tema
 }
 local SHOP_BY_ID = {}
 for _, item in ipairs(SHOP) do SHOP_BY_ID[item.id] = item end
