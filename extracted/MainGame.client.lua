@@ -179,12 +179,12 @@ local SHOP = {
 -- SES: asset ID'leri buraya yapistir (0 birakilan ses calmaz)
 -- ========================================================================
 local SOUND_IDS = {
-	move     = 0,   -- her gecerli hamle
-	merge    = 0,   -- birlestirme
-	buy      = 0,   -- magaza satin alma
-	gameOver = 0,   -- tur bitti
-	milestone= 0,   -- 2048 / 4096 / 8192 kutlamasi
-	daily    = 0,   -- gunluk odul
+	move      = 93910757377994,    -- kaydirma (birlestirmesiz gecerli hamle)
+	merge     = 100659874443815,   -- birlestirme
+	buy       = 101429305734272,   -- magaza satin alma
+	gameOver  = 127143445001460,   -- tur bitti
+	milestone = 106777367308214,   -- 2048 / 4096 / 8192 kutlamasi
+	daily     = 106777367308214,   -- gunluk odul (kutlama sesiyle ayni)
 }
 local SOUND_VOLUME = 0.5   -- %100 seviyedeki tavan ses siddeti
 
