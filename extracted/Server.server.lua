@@ -39,6 +39,19 @@ local topStore = DataStoreService:GetOrderedDataStore(TOP_STORE_NAME)
 -- (dogru ozellik adi CharacterAutoLoads; CharacterAutoSpawn diye ozellik yok)
 Players.CharacterAutoLoads = false
 
+-- DataStore saglik kontrolu: erisim yoksa kayit calismaz, aciktan uyar
+task.spawn(function()
+	local ok, err = pcall(function()
+		store:GetAsync("__health_check")
+	end)
+	if not ok then
+		warn("[NeonMerge2048] !!! DATASTORE ERISILEMIYOR - KAYIT CALISMAYACAK !!!")
+		warn("[NeonMerge2048] Cozum: 1) File > Publish to Roblox ile oyunu yayinla,")
+		warn("[NeonMerge2048] 2) Game Settings > Security > 'Enable Studio Access to API Services' ac.")
+		warn("[NeonMerge2048] Hata: " .. tostring(err))
+	end
+end)
+
 -- ========================================================================
 -- MAGAZA KATALOGU (istemciyle birebir ayni tutulmali)
 -- ========================================================================
@@ -244,6 +257,7 @@ local function defaultData()
 		schema = 2,
 		coins = 0,
 		best = 0,
+		bestTile = 0,   -- oyuncunun tum zamanlarda ulastigi en yuksek tile
 		theme = "Light",
 		up = sanitizeUp(nil),
 		run = nil,
@@ -284,6 +298,7 @@ local function publicState(data)
 	return {
 		coins = data.coins,
 		best = data.best,
+		bestTile = data.bestTile,
 		theme = data.theme,
 		up = deepCopy(data.up),
 		run = run and {
@@ -298,7 +313,12 @@ end
 -- ========================================================================
 -- Leaderboard
 -- ========================================================================
-local topCache = { time = -math.huge, list = {} }
+-- keyFor burada tanimli cunku fetchTop da ana kayittan okuma yapiyor
+local function keyFor(userId)
+	return "u_" .. userId
+end
+
+local topCache = { time = -math.huge, list = {}, ranks = {} }
 local nameCache = {}
 
 local function writeTop(userId, value)
@@ -307,38 +327,61 @@ local function writeTop(userId, value)
 	end)
 end
 
+-- Ilk 100 girisi ceker: ilk 10 icin isim + bestTile detayi, tamami icin rank haritasi
 local function fetchTop()
 	if os.clock() - topCache.time < TOP_CACHE_SECONDS then
-		return topCache.list
+		return topCache
 	end
 	topCache.time = os.clock()
 	local ok, pages = pcall(function()
-		return topStore:GetSortedAsync(false, 10)
+		return topStore:GetSortedAsync(false, 100)
 	end)
 	if ok then
-		local list = {}
-		for _, entry in ipairs(pages:GetCurrentPage()) do
+		local list, ranks = {}, {}
+		for rank, entry in ipairs(pages:GetCurrentPage()) do
 			local uid = tonumber(entry.key)
-			local name = nameCache[uid]
-			if not name and uid then
-				local okN, n = pcall(function()
-					return Players:GetNameFromUserIdAsync(uid)
-				end)
-				name = okN and n or "?"
-				nameCache[uid] = name
+			if uid then
+				ranks[uid] = rank
+				if rank <= 10 then
+					local name = nameCache[uid]
+					if not name then
+						local okN, n = pcall(function()
+							return Players:GetNameFromUserIdAsync(uid)
+						end)
+						name = okN and n or "?"
+						nameCache[uid] = name
+					end
+					-- bestTile ana kayittan okunur; oyuncu bu sunucudaysa taze oturum verisi kullanilir
+					local tile = 0
+					local onlinePlayer = Players:GetPlayerByUserId(uid)
+					local onlineSession = onlinePlayer and sessions[onlinePlayer]
+					if onlineSession and onlineSession.loaded then
+						tile = onlineSession.data.bestTile
+					else
+						local okD, saved = pcall(function()
+							return store:GetAsync(keyFor(uid))
+						end)
+						if okD and type(saved) == "table" then
+							tile = sanitizeNumber(saved.bestTile, 1048576) or 0
+						end
+					end
+					table.insert(list, { name = name, score = entry.value, tile = tile })
+				end
 			end
-			table.insert(list, { name = name or "?", score = entry.value })
 		end
 		topCache.list = list
+		topCache.ranks = ranks
 	end
-	return topCache.list
+	return topCache
 end
 
 -- Run biter: coin odulu + best + leaderboard. Kazanilan coini dondurur.
 local function endRun(session, run)
 	local data = session.data
-	local earned = coinsForRun(run.score, boardMax(run.board, run.size), data.up.coin)
+	local maxTile = boardMax(run.board, run.size)
+	local earned = coinsForRun(run.score, maxTile, data.up.coin)
 	data.coins = math.min(data.coins + earned, MAX_COINS)
+	data.bestTile = math.max(data.bestTile, maxTile)
 	if run.score > data.best then
 		data.best = math.min(run.score, MAX_SCORE)
 	end
@@ -357,10 +400,6 @@ end
 -- ========================================================================
 -- DataStore yukle / yaz
 -- ========================================================================
-local function keyFor(userId)
-	return "u_" .. userId
-end
-
 local function loadData(userId)
 	for attempt = 1, 3 do
 		local ok, result = pcall(function()
@@ -370,8 +409,9 @@ local function loadData(userId)
 			local data = defaultData()
 			if type(result) == "table" then
 				if result.schema == 2 then
-					data.coins = sanitizeNumber(result.coins, MAX_COINS) or 0
-					data.best  = sanitizeNumber(result.best, MAX_SCORE) or 0
+					data.coins    = sanitizeNumber(result.coins, MAX_COINS) or 0
+					data.best     = sanitizeNumber(result.best, MAX_SCORE) or 0
+					data.bestTile = sanitizeNumber(result.bestTile, 1048576) or 0
 					data.theme = (result.theme == "Dark") and "Dark" or "Light"
 					data.up    = sanitizeUp(result.up)
 					local run = result.run
@@ -380,6 +420,7 @@ local function loadData(userId)
 						local board = sanitizeBoard(run.board, size)
 						local score = sanitizeNumber(run.score, MAX_SCORE)
 						if board and score and (size == 4 or data.up.grid5 > 0) then
+							data.bestTile = math.max(data.bestTile, boardMax(board, size))
 							data.run = {
 								board = board, score = score,
 								seed = sanitizeNumber(run.seed, 2_000_000_000) or 1,
@@ -399,6 +440,7 @@ local function loadData(userId)
 					local board = sanitizeBoard(result.board, 4)
 					local score = sanitizeNumber(result.score, MAX_SCORE)
 					if board and score then
+						data.bestTile = boardMax(board, 4)
 						data.run = {
 							board = board, score = score,
 							seed = Random.new():NextInteger(1, 1_000_000_000),
@@ -424,6 +466,7 @@ local function serializeData(data)
 		schema = 2,
 		coins = data.coins,
 		best = data.best,
+		bestTile = data.bestTile,
 		theme = data.theme,
 		up = deepCopy(data.up),
 		run = run and {
@@ -556,8 +599,12 @@ MoveEvent.OnServerEvent:Connect(function(playerObj, dir)
 	run.spawns += 1
 	session.dirty = true
 
+	local maxTile = boardMax(run.board, run.size)
+	if maxTile > data.bestTile then
+		data.bestTile = maxTile
+	end
 	local justWon = false
-	if not run.won and boardMax(run.board, run.size) >= 2048 then
+	if not run.won and maxTile >= 2048 then
 		run.won = true
 		justWon = true
 	end
@@ -638,7 +685,16 @@ Act.OnServerInvoke = function(playerObj, req)
 		return { ok = false, err = "bad_theme" }
 
 	elseif a == "top" then
-		return { ok = true, list = fetchTop() }
+		local cache = fetchTop()
+		return {
+			ok = true,
+			list = cache.list,
+			me = {
+				rank = cache.ranks[playerObj.UserId],   -- ilk 100'de degilse nil
+				best = data.best,
+				tile = data.bestTile,
+			},
+		}
 	end
 
 	return { ok = false, err = "unknown" }

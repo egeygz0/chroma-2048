@@ -648,6 +648,46 @@ make("UIListLayout", {
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, shopList)
 
+-- Kendi siralaman: TOP 10 sekmesinde altta sabit bar (RANK / BEST / BLOCK)
+local meBar = make("Frame", {
+	Name = "MeBar",
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 0, 1, 0),
+	Size = UDim2.new(1, 0, 0, 48),
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 21,
+}, shopModal)
+corner(meBar, TILE_RADIUS)
+
+local meCaps, meVals = {}, {}
+local function meStat(caption, index)
+	local cap = make("TextLabel", {
+		Position = UDim2.new((index - 1) / 3, 0, 0, 6),
+		Size = UDim2.new(1 / 3, 0, 0, 12),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = caption,
+		TextSize = 10,
+		ZIndex = 22,
+	}, meBar)
+	local val = make("TextLabel", {
+		Position = UDim2.new((index - 1) / 3, 0, 0, 20),
+		Size = UDim2.new(1 / 3, 0, 0, 22),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = "-",
+		TextSize = 16,
+		ZIndex = 22,
+	}, meBar)
+	table.insert(meCaps, cap)
+	table.insert(meVals, val)
+	return val
+end
+local meRankVal = meStat("RANK", 1)
+local meBestVal = meStat("BEST", 2)
+local meTileVal = meStat("BLOCK", 3)
+
 -- ========================================================================
 -- 5. THEME MANAGER
 -- ========================================================================
@@ -1084,7 +1124,7 @@ end
 
 local function buildTopRows()
 	local loadingRow, loadingText = shopRow(40)
-	local label = make("TextLabel", {
+	make("TextLabel", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBold,
@@ -1097,7 +1137,32 @@ local function buildTopRows()
 		local res = act({ a = "top" })
 		if not shopModal.Visible or shopTab ~= "top" then return end
 		loadingRow:Destroy()
+		local t = THEMES[currentTheme]
 		local list = (res and res.ok and res.list) or {}
+
+		-- Kolon basliklari: PLAYER | SCORE | BLOCK
+		local head = make("Frame", {
+			Size = UDim2.new(1, -6, 0, 16),
+			BackgroundTransparency = 1,
+			ZIndex = 21,
+		}, shopList)
+		local function headLabel(text, pos, size, align)
+			make("TextLabel", {
+				Position = pos,
+				Size = size,
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = text,
+				TextColor3 = t.statLabel,
+				TextSize = 10,
+				TextXAlignment = align,
+				ZIndex = 22,
+			}, head)
+		end
+		headLabel("PLAYER", UDim2.fromOffset(10, 0), UDim2.new(0.5, -10, 1, 0), Enum.TextXAlignment.Left)
+		headLabel("SCORE", UDim2.new(0.5, 0, 0, 0), UDim2.new(0.28, 0, 1, 0), Enum.TextXAlignment.Right)
+		headLabel("BLOCK", UDim2.new(0.78, 0, 0, 0), UDim2.new(0.22, -10, 1, 0), Enum.TextXAlignment.Right)
+
 		if #list == 0 then
 			local row, rowText = shopRow(40)
 			make("TextLabel", {
@@ -1109,34 +1174,68 @@ local function buildTopRows()
 				TextSize = 14,
 				ZIndex = 22,
 			}, row)
-			return
+		else
+			for rank, entry in ipairs(list) do
+				local row, rowText = shopRow(38)
+				make("TextLabel", {
+					Position = UDim2.fromOffset(10, 0),
+					Size = UDim2.new(0.5, -10, 1, 0),
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamBold,
+					Text = rank .. ". " .. entry.name,
+					TextColor3 = rowText,
+					TextSize = 13,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextTruncate = Enum.TextTruncate.AtEnd,
+					ZIndex = 22,
+				}, row)
+				make("TextLabel", {
+					Position = UDim2.new(0.5, 0, 0, 0),
+					Size = UDim2.new(0.28, 0, 1, 0),
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamBlack,
+					Text = tostring(entry.score),
+					TextColor3 = rowText,
+					TextSize = 13,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					ZIndex = 22,
+				}, row)
+				make("TextLabel", {
+					Position = UDim2.new(0.78, 0, 0, 0),
+					Size = UDim2.new(0.22, -10, 1, 0),
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamBlack,
+					Text = (entry.tile and entry.tile > 0) and tostring(entry.tile) or "-",
+					TextColor3 = rowText,
+					TextSize = 13,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					ZIndex = 22,
+				}, row)
+			end
 		end
-		for rank, entry in ipairs(list) do
-			local row, rowText = shopRow(38)
-			make("TextLabel", {
-				Position = UDim2.fromOffset(10, 0),
-				Size = UDim2.new(0.65, 0, 1, 0),
-				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				Text = rank .. ". " .. entry.name,
-				TextColor3 = rowText,
-				TextSize = 13,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				TextTruncate = Enum.TextTruncate.AtEnd,
-				ZIndex = 22,
-			}, row)
-			make("TextLabel", {
-				AnchorPoint = Vector2.new(1, 0),
-				Position = UDim2.new(1, -10, 0, 0),
-				Size = UDim2.new(0.3, 0, 1, 0),
-				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBlack,
-				Text = tostring(entry.score),
-				TextColor3 = rowText,
-				TextSize = 13,
-				TextXAlignment = Enum.TextXAlignment.Right,
-				ZIndex = 22,
-			}, row)
+
+		-- Alt bar: kendi rank / best / block degerlerin
+		if res and res.ok and res.me then
+			local me = res.me
+			meBar.BackgroundColor3 = t.empty
+			local mc = textColorFor(t.empty)
+			for _, cap in ipairs(meCaps) do
+				cap.TextColor3 = mc
+				cap.TextTransparency = 0.4
+			end
+			for _, val in ipairs(meVals) do
+				val.TextColor3 = mc
+			end
+			if me.rank then
+				meRankVal.Text = "#" .. me.rank
+			elseif (me.best or 0) > 0 then
+				meRankVal.Text = "100+"
+			else
+				meRankVal.Text = "-"
+			end
+			meBestVal.Text = tostring(me.best or 0)
+			meTileVal.Text = (me.tile and me.tile > 0) and tostring(me.tile) or "-"
+			meBar.Visible = true
 		end
 	end)
 end
@@ -1146,6 +1245,9 @@ rebuildShop = function()
 		if child:IsA("Frame") then child:Destroy() end
 	end
 	modalTitle.Text = (shopTab == "shop") and "SHOP" or "TOP 10"
+	meBar.Visible = false
+	-- TOP 10 sekmesinde liste, alttaki kisisel bara yer birakir
+	shopList.Size = (shopTab == "top") and UDim2.new(1, 0, 1, -98) or UDim2.new(1, 0, 1, -42)
 	if shopTab == "shop" then
 		buildShopRows()
 	else
