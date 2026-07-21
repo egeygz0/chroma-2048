@@ -2290,6 +2290,48 @@ end
 local function buildShopRows()
 	local t = THEMES[currentTheme]
 
+	-- Boyut secimi en ustte: kilit acilinca kaydirmadan gorunur olmali
+	local maxSize = BASE_BOARD_SIZE + S.up.grid5
+	if maxSize > BASE_BOARD_SIZE then
+		local row, rowText = shopRow(60)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 8),
+			Size = UDim2.new(1, -20, 0, 18),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = "Board Size (starts a new run)",
+			TextColor3 = rowText,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 22,
+		}, row)
+		for i = 1, maxSize - BASE_BOARD_SIZE + 1 do
+			local size = BASE_BOARD_SIZE + i - 1
+			local active = (S.size == size)
+			local button = make("TextButton", {
+				AnchorPoint = Vector2.new(0, 1),
+				Position = UDim2.new(0, 10 + (i - 1) * 78, 1, -8),
+				Size = UDim2.fromOffset(72, 28),
+				BackgroundColor3 = active and ACCENT or t.button,
+				Font = Enum.Font.GothamBold,
+				Text = size .. "x" .. size,
+				TextColor3 = active and WHITE_TEXT or t.buttonText,
+				TextSize = 13,
+				AutoButtonColor = not active,
+				BorderSizePixel = 0,
+				ZIndex = 22,
+			}, row)
+			corner(button, 14)
+			if not active then
+				button.Activated:Connect(function()
+					S.shopOpen = false
+					shopModal.Visible = false
+					requestNewGame(size)
+				end)
+			end
+		end
+	end
+
 	for _, item in ipairs(SHOP) do
 		local lv = S.up[item.id]
 		local row, rowText = shopRow(64)
@@ -2381,52 +2423,17 @@ local function buildShopRows()
 					end
 					playSound("buy")
 					updateHUD()
+					-- Tahta yukseltmesi aninda uygulanir: yeni boyutta tur baslar.
+					-- Mevcut tur coin'e cevrildigi icin kayip olmaz.
+					if item.id == "grid5" then
+						S.shopOpen = false
+						shopModal.Visible = false
+						requestNewGame(BASE_BOARD_SIZE + S.up.grid5)
+						return
+					end
 					rebuildShop()
 				end
 			end)
-		end
-	end
-
-	-- Buyuk tahta kilidi acildiysa boyut secimi: acik her boyut icin bir dugme
-	local maxSize = BASE_BOARD_SIZE + S.up.grid5
-	if maxSize > BASE_BOARD_SIZE then
-		local row, rowText = shopRow(60)
-		make("TextLabel", {
-			Position = UDim2.fromOffset(10, 8),
-			Size = UDim2.new(1, -20, 0, 18),
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBold,
-			Text = "Board Size (starts a new run)",
-			TextColor3 = rowText,
-			TextSize = 13,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			ZIndex = 22,
-		}, row)
-		local count = maxSize - BASE_BOARD_SIZE + 1
-		for i = 1, count do
-			local size = BASE_BOARD_SIZE + i - 1
-			local active = (S.size == size)
-			local button = make("TextButton", {
-				AnchorPoint = Vector2.new(0, 1),
-				Position = UDim2.new(0, 10 + (i - 1) * 78, 1, -8),
-				Size = UDim2.fromOffset(72, 28),
-				BackgroundColor3 = active and ACCENT or t.button,
-				Font = Enum.Font.GothamBold,
-				Text = size .. "x" .. size,
-				TextColor3 = active and WHITE_TEXT or t.buttonText,
-				TextSize = 13,
-				AutoButtonColor = not active,
-				BorderSizePixel = 0,
-				ZIndex = 22,
-			}, row)
-			corner(button, 14)
-			if not active then
-				button.Activated:Connect(function()
-					S.shopOpen = false
-					shopModal.Visible = false
-					requestNewGame(size)
-				end)
-			end
 		end
 	end
 
