@@ -928,17 +928,19 @@ local modalTitle = make("TextLabel", {
 	ZIndex = 21,
 }, shopModal)
 
--- TOP 10 alt sekmeleri: SCORE (skor siralamasi) / BLOCK (en yuksek blok siralamasi)
-local topSubBar = make("Frame", {
-	Name = "TopSubBar",
-	Position = UDim2.new(0, 0, 0, 40),
-	Size = UDim2.new(1, 0, 0, 30),
-	BackgroundTransparency = 1,
-	Visible = false,
-	ZIndex = 21,
-}, shopModal)
+-- Modal alt sekme cubugu (SHOP ve TOP 10 ayni yapiyi kullanir)
+local function subTabBar(name)
+	return make("Frame", {
+		Name = name,
+		Position = UDim2.new(0, 0, 0, 40),
+		Size = UDim2.new(1, 0, 0, 30),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 21,
+	}, shopModal)
+end
 
-local function subTabButton(text, xOffset)
+local function subTabButton(parent, text, xOffset)
 	local b = make("TextButton", {
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, xOffset, 0, 0),
@@ -949,12 +951,20 @@ local function subTabButton(text, xOffset)
 		AutoButtonColor = true,
 		BorderSizePixel = 0,
 		ZIndex = 21,
-	}, topSubBar)
+	}, parent)
 	corner(b, 14)
 	return b
 end
-local scoreTabButton = subTabButton("SCORE", -47)
-local blockTabButton = subTabButton("BLOCK", 47)
+
+-- TOP 10 alt sekmeleri: SCORE (skor siralamasi) / BLOCK (en yuksek blok siralamasi)
+local topSubBar = subTabBar("TopSubBar")
+local scoreTabButton = subTabButton(topSubBar, "SCORE", -47)
+local blockTabButton = subTabButton(topSubBar, "BLOCK", 47)
+
+-- SHOP alt sekmeleri: COIN (coin ile alinanlar) / ROBUX (Robux urunleri)
+local shopSubBar = subTabBar("ShopSubBar")
+local coinTabButton  = subTabButton(shopSubBar, "COIN", -47)
+local robuxTabButton = subTabButton(shopSubBar, "ROBUX", 47)
 
 local closeButton = make("TextButton", {
 	Name = "Close",
@@ -1029,6 +1039,9 @@ local meMetricVal, meMetricCap = meStat("SCORE", 2)
 -- ========================================================================
 -- 5. THEME MANAGER
 -- ========================================================================
+-- Ileri bildirim: magaza icerigi tema degisiminde ve satin alma/sync olaylarinda yenilenir
+local rebuildShop
+
 local function tween(inst, props)
 	TweenService:Create(inst, THEME_TWEEN, props):Play()
 end
@@ -1043,6 +1056,8 @@ local function applyTheme(name)
 	for _, b in ipairs({ themeButton, topButton, shopButton, newButton, undoButton, closeButton }) do
 		tween(b, { BackgroundColor3 = t.button, TextColor3 = t.buttonText })
 	end
+	-- Alt sekmelerin pasif olani tema rengini alir; aktif olan rebuildShop'ta mavi boyanir
+	if shopModal.Visible then rebuildShop() end
 	tween(modalTitle, { TextColor3 = t.text })
 	for _, statFrame in ipairs({ scoreFrame, bestFrame, coinFrame }) do
 		tween(statFrame, { BackgroundColor3 = t.button })
@@ -1334,9 +1349,6 @@ local function showWin(tile)
 	overlay.Visible = true
 end
 
--- Ileri bildirim: magaza icerigi satin alma/sync olaylarinda yenilenir
-local rebuildShop
-
 -- Sunucudan gelen tam durumu uygula
 local function applyState(state, earned)
 	if type(state) ~= "table" then return end
@@ -1544,6 +1556,7 @@ end)
 -- ========================================================================
 local shopTab = "shop"        -- "shop" | "top"
 local topBoard = "score"      -- "score" | "tile" (TOP 10 alt sekmesi)
+local shopBoard = "coin"      -- "coin" | "robux" (SHOP alt sekmesi)
 local topRefreshToken = 0     -- otomatik yenileme iptali icin sayac
 local TOP_REFRESH_SECONDS = 150
 
@@ -1619,17 +1632,19 @@ local function sectionHeader(text)
 	}, head)
 end
 
-local function buildShopRows()
+-- ROBUX sekmesi: coin paketleri, VIP gamepass ve Robux ile acilan temalar
+local function buildRobuxRows()
 	local t = THEMES[currentTheme]
+	local anyRow = false
 
-	-- BUY COINS bolumu: yalnizca tanimli urunler gosterilir
 	local bundles = {}
 	for _, bundle in ipairs(COIN_BUNDLES) do
 		if bundle.id ~= 0 then table.insert(bundles, bundle) end
 	end
-	local vipSellable = (GAMEPASS_2X_COINS ~= 0) and not S.vip
-	if #bundles > 0 or vipSellable then
-		sectionHeader("BUY COINS")
+
+	if #bundles > 0 then
+		sectionHeader("COIN PACKS")
+		anyRow = true
 		for _, bundle in ipairs(bundles) do
 			local row, rowText = shopRow(52)
 			coinIcon(row, 20, 22).Position = UDim2.new(0, 10, 0.5, 0)
@@ -1648,48 +1663,109 @@ local function buildShopRows()
 				promptProduct(bundle.id)
 			end)
 		end
-		if vipSellable then
-			local row, rowText = shopRow(58)
+	end
+
+	if GAMEPASS_2X_COINS ~= 0 then
+		sectionHeader("PASSES")
+		anyRow = true
+		local row, rowText = shopRow(58)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 8),
+			Size = UDim2.new(1, -120, 0, 18),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = "VIP 2x Coins",
+			TextColor3 = rowText,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 22,
+		}, row)
+		make("TextLabel", {
+			Position = UDim2.fromOffset(10, 28),
+			Size = UDim2.new(1, -120, 0, 20),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Gotham,
+			Text = "Permanent: double coins from every run",
+			TextColor3 = rowText,
+			TextTransparency = 0.25,
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 22,
+		}, row)
+		if S.vip then
 			make("TextLabel", {
-				Position = UDim2.fromOffset(10, 8),
-				Size = UDim2.new(1, -120, 0, 18),
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -10, 0.5, 0),
+				Size = UDim2.fromOffset(96, 36),
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
-				Text = "VIP 2x Coins",
-				TextColor3 = rowText,
+				Text = "OWNED",
+				TextColor3 = hex("00C853"),
 				TextSize = 14,
-				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 22,
 			}, row)
-			make("TextLabel", {
-				Position = UDim2.fromOffset(10, 28),
-				Size = UDim2.new(1, -120, 0, 20),
-				BackgroundTransparency = 1,
-				Font = Enum.Font.Gotham,
-				Text = "Permanent: double coins from every run",
-				TextColor3 = rowText,
-				TextTransparency = 0.25,
-				TextSize = 11,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = 22,
-			}, row)
+		else
 			robuxButton(row, "R$ BUY", -10, 96, function()
 				promptGamePass(GAMEPASS_2X_COINS)
 			end)
 		end
-		sectionHeader("UPGRADES")
 	end
+
+	-- Robux ile alinabilen temalar (coin ile de COIN sekmesinden alinabilir)
+	local themeRows = {}
+	for _, item in ipairs(SHOP) do
+		local productId = THEME_PRODUCTS[item.id]
+		if productId and productId ~= 0 and S.up[item.id] < item.max then
+			table.insert(themeRows, { item = item, productId = productId })
+		end
+	end
+	if #themeRows > 0 then
+		sectionHeader("THEMES")
+		anyRow = true
+		for _, entry in ipairs(themeRows) do
+			local row, rowText = shopRow(52)
+			make("TextLabel", {
+				Position = UDim2.fromOffset(10, 0),
+				Size = UDim2.new(1, -120, 1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = entry.item.name,
+				TextColor3 = rowText,
+				TextSize = 14,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 22,
+			}, row)
+			robuxButton(row, "R$ BUY", -10, 96, function()
+				promptProduct(entry.productId)
+			end)
+		end
+	end
+
+	if not anyRow then
+		local row, rowText = shopRow(48)
+		make("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = "No Robux items available yet",
+			TextColor3 = rowText,
+			TextSize = 13,
+			ZIndex = 22,
+		}, row)
+	end
+end
+
+-- COIN sekmesi: coin ile alinan yukseltmeler + tahta boyutu + veri sifirlama
+local function buildShopRows()
+	local t = THEMES[currentTheme]
 
 	for _, item in ipairs(SHOP) do
 		local lv = S.up[item.id]
 		local row, rowText = shopRow(64)
-		-- Robux alternatifi varsa metin alani daralir, butonlarin altina girmez
-		local themeProduct = THEME_PRODUCTS[item.id]
-		local hasRobuxAlt = (themeProduct ~= nil and themeProduct ~= 0 and lv < item.max)
-		local textInset = hasRobuxAlt and -188 or -130
 		make("TextLabel", {
 			Position = UDim2.fromOffset(10, 8),
-			Size = UDim2.new(1, textInset, 0, 18),
+			Size = UDim2.new(1, -130, 0, 18),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Text = item.name .. "  (" .. lv .. "/" .. item.max .. ")",
@@ -1701,7 +1777,7 @@ local function buildShopRows()
 		}, row)
 		make("TextLabel", {
 			Position = UDim2.fromOffset(10, 30),
-			Size = UDim2.new(1, textInset, 0, 26),
+			Size = UDim2.new(1, -130, 0, 26),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Gotham,
 			Text = item.desc,
@@ -1713,16 +1789,10 @@ local function buildShopRows()
 			TextYAlignment = Enum.TextYAlignment.Top,
 			ZIndex = 22,
 		}, row)
-		-- Tema urunlerinde Robux alternatifi: coin fiyati sola kayar
-		if hasRobuxAlt then
-			robuxButton(row, "R$", -10, 52, function()
-				promptProduct(themeProduct)
-			end)
-		end
 
 		local buyButton = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, hasRobuxAlt and -68 or -10, 0.5, 0),
+			Position = UDim2.new(1, -10, 0.5, 0),
 			Size = UDim2.fromOffset(104, 36),
 			Font = Enum.Font.GothamBold,
 			TextSize = 14,
@@ -1990,6 +2060,15 @@ local function buildTopRows()
 	end)
 end
 
+-- Aktif alt sekme mavi, digeri tema rengi
+local function styleSubTabs(activeB, idleB)
+	local t = THEMES[currentTheme]
+	activeB.BackgroundColor3 = ACCENT
+	activeB.TextColor3 = WHITE_TEXT
+	idleB.BackgroundColor3 = t.button
+	idleB.TextColor3 = t.buttonText
+end
+
 rebuildShop = function()
 	for _, child in ipairs(shopList:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
@@ -1998,23 +2077,27 @@ rebuildShop = function()
 	modalTitle.Text = isTop and "TOP 10" or "SHOP"
 	meBar.Visible = false
 	topSubBar.Visible = isTop
+	shopSubBar.Visible = not isTop
+
 	if isTop then
-		-- Aktif alt sekme mavi, digeri tema rengi
-		local t = THEMES[currentTheme]
-		local activeB = (topBoard == "score") and scoreTabButton or blockTabButton
-		local idleB = (topBoard == "score") and blockTabButton or scoreTabButton
-		activeB.BackgroundColor3 = ACCENT
-		activeB.TextColor3 = WHITE_TEXT
-		idleB.BackgroundColor3 = t.button
-		idleB.TextColor3 = t.buttonText
+		styleSubTabs(
+			(topBoard == "score") and scoreTabButton or blockTabButton,
+			(topBoard == "score") and blockTabButton or scoreTabButton)
 		-- Liste, ustte alt sekmelere ve altta kisisel bara yer birakir
 		shopList.Position = UDim2.new(0, 0, 0, 78)
 		shopList.Size = UDim2.new(1, 0, 1, -134)
 		buildTopRows()
 	else
-		shopList.Position = UDim2.new(0, 0, 0, 42)
-		shopList.Size = UDim2.new(1, 0, 1, -42)
-		buildShopRows()
+		styleSubTabs(
+			(shopBoard == "coin") and coinTabButton or robuxTabButton,
+			(shopBoard == "coin") and robuxTabButton or coinTabButton)
+		shopList.Position = UDim2.new(0, 0, 0, 78)
+		shopList.Size = UDim2.new(1, 0, 1, -78)
+		if shopBoard == "coin" then
+			buildShopRows()
+		else
+			buildRobuxRows()
+		end
 	end
 end
 
@@ -2028,6 +2111,20 @@ end)
 blockTabButton.Activated:Connect(function()
 	if topBoard ~= "tile" then
 		topBoard = "tile"
+		rebuildShop()
+	end
+end)
+
+coinTabButton.Activated:Connect(function()
+	if shopBoard ~= "coin" then
+		shopBoard = "coin"
+		rebuildShop()
+	end
+end)
+
+robuxTabButton.Activated:Connect(function()
+	if shopBoard ~= "robux" then
+		shopBoard = "robux"
 		rebuildShop()
 	end
 end)

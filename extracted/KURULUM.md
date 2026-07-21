@@ -16,6 +16,15 @@
 - `ProcessReceipt` makbuzları `PurchaseId` ile tekilleştirir (son 40 kayıtta tutulur); oturum hazır değilse veya kayıt yazılamazsa `NotProcessedYet` döner, satın alma kaybolmaz. Sunucuda tanımlı olmayan ürün ID'si de `NotProcessedYet` döner ki Robux karşılıksız yanmasın.
 - Veri sıfırlama (`RESET ALL DATA`) Robux ile alınmış hakları korur: gamepass, makbuz geçmişi ve Robux'la açılmış temalar geri verilir; coin ile alınanlar sıfırlanır.
 
+**Mağaza sekmeleri:** SHOP modalı TOP 10'daki gibi iki alt sekmeye ayrılır:
+
+| Sekme | İçerik |
+|---|---|
+| COIN | Coin ile alınan yükseltmeler, 4x4/5x5 geçişi, `RESET ALL DATA` |
+| ROBUX | Coin paketleri, VIP 2x Coins pass'i (sahipse "OWNED"), Robux ile açılan temalar |
+
+ROBUX sekmesinde tanımlı ürün yoksa (tüm ID'ler `0`) "No Robux items available yet" yazar.
+
 ### Diğer
 
 - **Görsel efektler:** 512+ birleştirmede tahtaya 0.12 sn'lik sarsıntı; kilometre taşı ve günlük ödülde konfeti patlaması + tahta çerçevesinin parlaması.
