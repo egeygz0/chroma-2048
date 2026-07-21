@@ -184,7 +184,7 @@ local SOUND_IDS = {
 	buy       = 101429305734272,   -- magaza satin alma
 	gameOver  = 127143445001460,   -- tur bitti
 	milestone = 106777367308214,   -- 2048 / 4096 / 8192 kutlamasi
-	daily     = 106777367308214,   -- gunluk odul (kutlama sesiyle ayni)
+	daily     = 101429305734272,   -- gunluk odul (coin sesiyle ayni)
 }
 local SOUND_VOLUME = 0.5   -- %100 seviyedeki tavan ses siddeti
 
