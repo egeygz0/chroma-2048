@@ -25,15 +25,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService        = game:GetService("RunService")
 
 local STORE_NAME        = "NeonMerge2048Save_v1"
-local TOP_STORE_NAME    = "NeonMerge2048Top_v1"
+local TOP_STORE_NAME    = "NeonMerge2048Top_v1"      -- skor siralamasi
+local TILE_STORE_NAME   = "NeonMerge2048TopTile_v1"  -- en yuksek blok siralamasi
 local AUTOSAVE_INTERVAL = 30
 local MIN_WRITE_GAP     = 6
 local MAX_SCORE         = 40_000_000
 local MAX_COINS         = 1_000_000_000
-local TOP_CACHE_SECONDS = 60
+local TOP_CACHE_SECONDS = 150   -- leaderboard onbellegi (~2.5 dk'da bir tazelenir)
 
-local store    = DataStoreService:GetDataStore(STORE_NAME)
-local topStore = DataStoreService:GetOrderedDataStore(TOP_STORE_NAME)
+local store     = DataStoreService:GetDataStore(STORE_NAME)
+local topStore  = DataStoreService:GetOrderedDataStore(TOP_STORE_NAME)
+local tileStore = DataStoreService:GetOrderedDataStore(TILE_STORE_NAME)
 
 -- 3D karakter tamamen kapali: oyun saf 2D ScreenGui, avatar hic dogmaz
 -- (dogru ozellik adi CharacterAutoLoads; CharacterAutoSpawn diye ozellik yok)
@@ -318,23 +320,29 @@ local function keyFor(userId)
 	return "u_" .. userId
 end
 
-local topCache = { time = -math.huge, list = {}, ranks = {} }
+local topCaches = {
+	score = { time = -math.huge, list = {}, ranks = {} },
+	tile  = { time = -math.huge, list = {}, ranks = {} },
+}
 local nameCache = {}
 
-local function writeTop(userId, value)
+local function writeOrdered(orderedStore, userId, value)
 	pcall(function()
-		topStore:SetAsync(tostring(userId), value)
+		orderedStore:SetAsync(tostring(userId), value)
 	end)
 end
 
--- Ilk 100 girisi ceker: ilk 10 icin isim + bestTile detayi, tamami icin rank haritasi
-local function fetchTop()
-	if os.clock() - topCache.time < TOP_CACHE_SECONDS then
-		return topCache
+-- Ilk 100 girisi ceker (kind: "score" | "tile"): ilk 10 icin isim + diger metrik,
+-- tamami icin rank haritasi. TOP_CACHE_SECONDS'ta bir tazelenir.
+local function fetchTop(kind)
+	local cache = topCaches[kind]
+	if os.clock() - cache.time < TOP_CACHE_SECONDS then
+		return cache
 	end
-	topCache.time = os.clock()
+	cache.time = os.clock()
+	local orderedStore = (kind == "tile") and tileStore or topStore
 	local ok, pages = pcall(function()
-		return topStore:GetSortedAsync(false, 100)
+		return orderedStore:GetSortedAsync(false, 100)
 	end)
 	if ok then
 		local list, ranks = {}, {}
@@ -351,28 +359,31 @@ local function fetchTop()
 						name = okN and n or "?"
 						nameCache[uid] = name
 					end
-					-- bestTile ana kayittan okunur; oyuncu bu sunucudaysa taze oturum verisi kullanilir
-					local tile = 0
+					local score, tile
+					if kind == "tile" then tile = entry.value else score = entry.value end
+					-- Eksik metrik: once bu sunucudaki taze oturum, yoksa ana kayit
 					local onlinePlayer = Players:GetPlayerByUserId(uid)
 					local onlineSession = onlinePlayer and sessions[onlinePlayer]
 					if onlineSession and onlineSession.loaded then
-						tile = onlineSession.data.bestTile
+						score = score or onlineSession.data.best
+						tile = tile or onlineSession.data.bestTile
 					else
 						local okD, saved = pcall(function()
 							return store:GetAsync(keyFor(uid))
 						end)
 						if okD and type(saved) == "table" then
-							tile = sanitizeNumber(saved.bestTile, 1048576) or 0
+							score = score or sanitizeNumber(saved.best, MAX_SCORE) or 0
+							tile = tile or sanitizeNumber(saved.bestTile, 1048576) or 0
 						end
 					end
-					table.insert(list, { name = name, score = entry.value, tile = tile })
+					table.insert(list, { name = name, score = score or 0, tile = tile or 0 })
 				end
 			end
 		end
-		topCache.list = list
-		topCache.ranks = ranks
+		cache.list = list
+		cache.ranks = ranks
 	end
-	return topCache
+	return cache
 end
 
 -- Run biter: coin odulu + best + leaderboard. Kazanilan coini dondurur.
@@ -390,10 +401,14 @@ local function endRun(session, run)
 end
 
 local function pushBestToTop(playerObj, session)
-	if session.data.best > (session.topWritten or 0) then
-		session.topWritten = session.data.best
-		local best = session.data.best
-		task.spawn(writeTop, playerObj.UserId, best)
+	local data = session.data
+	if data.best > (session.topWritten or 0) then
+		session.topWritten = data.best
+		task.spawn(writeOrdered, topStore, playerObj.UserId, data.best)
+	end
+	if data.bestTile > (session.tileWritten or 0) then
+		session.tileWritten = data.bestTile
+		task.spawn(writeOrdered, tileStore, playerObj.UserId, data.bestTile)
 	end
 end
 
@@ -536,10 +551,11 @@ local function onPlayerAdded(playerObj)
 		playerObj.Character:Destroy()
 	end
 
-	local session = { data = nil, loaded = false, dirty = false, lastWrite = 0, topWritten = 0 }
+	local session = { data = nil, loaded = false, dirty = false, lastWrite = 0, topWritten = 0, tileWritten = 0 }
 	sessions[playerObj] = session
 	session.data = loadData(playerObj.UserId)
 	session.topWritten = session.data.best
+	session.tileWritten = session.data.bestTile
 	session.loaded = true
 end
 
@@ -685,12 +701,13 @@ Act.OnServerInvoke = function(playerObj, req)
 		return { ok = false, err = "bad_theme" }
 
 	elseif a == "top" then
-		local cache = fetchTop()
+		local kind = (req.board == "tile") and "tile" or "score"
+		local cache = fetchTop(kind)
 		return {
 			ok = true,
 			list = cache.list,
 			me = {
-				rank = cache.ranks[playerObj.UserId],   -- ilk 100'de degilse nil
+				rank = cache.ranks[playerObj.UserId],   -- o sekmenin ilk 100'unde degilse nil
 				best = data.best,
 				tile = data.bestTile,
 			},

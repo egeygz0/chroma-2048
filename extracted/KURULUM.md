@@ -2,8 +2,8 @@
 
 ## v3.2'de Yeni: Zengin Leaderboard + Kayıt Sağlık Kontrolü
 
-- **TOP 10 üç kolonlu:** PLAYER / SCORE / BLOCK (oyuncunun ulaştığı en yüksek tile, örn. 256/512). En yüksek tile `bestTile` alanıyla kayda işlenir.
-- **Kendi sıralaman:** TOP 10 sekmesinin altında sabit bar: RANK (ilk 100 içindeysen #N, değilsen 100+), BEST, BLOCK.
+- **TOP 10 iki alt sekmeli:** SCORE (skor sıralaması, OrderedDataStore `NeonMerge2048Top_v1`) ve BLOCK (en yüksek blok sıralaması, `NeonMerge2048TopTile_v1`). Kolonlar aktif sekmenin metriğini ortada gösterir; liste sekme açık kaldıkça ~2.5 dakikada bir otomatik yenilenir (sunucu önbelleği de 150 sn).
+- **Kendi sıralaman:** TOP 10'un altında sabit bar: RANK (aktif sekmenin ilk 100'ünde isen #N, değilsen 100+), BEST, BLOCK. En yüksek tile `bestTile` alanıyla kayda işlenir.
 - **DataStore sağlık kontrolü:** sunucu açılışında DataStore erişimi test edilir; erişilemiyorsa konsola büyük uyarı yazılır (kayıt sıfırlanıyor şikayetlerinin bir numaralı nedeni: oyun yayınlanmamış veya "Enable Studio Access to API Services" kapalı).
 
 ## v3.1'de Yeni: Temiz 2D Sahne + Modern UI Derinliği

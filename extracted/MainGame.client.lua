@@ -618,6 +618,34 @@ local modalTitle = make("TextLabel", {
 	ZIndex = 21,
 }, shopModal)
 
+-- TOP 10 alt sekmeleri: SCORE (skor siralamasi) / BLOCK (en yuksek blok siralamasi)
+local topSubBar = make("Frame", {
+	Name = "TopSubBar",
+	Position = UDim2.new(0, 0, 0, 40),
+	Size = UDim2.new(1, 0, 0, 30),
+	BackgroundTransparency = 1,
+	Visible = false,
+	ZIndex = 21,
+}, shopModal)
+
+local function subTabButton(text, xOffset)
+	local b = make("TextButton", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, xOffset, 0, 0),
+		Size = UDim2.fromOffset(88, 28),
+		Font = Enum.Font.GothamBold,
+		Text = text,
+		TextSize = 13,
+		AutoButtonColor = true,
+		BorderSizePixel = 0,
+		ZIndex = 21,
+	}, topSubBar)
+	corner(b, 14)
+	return b
+end
+local scoreTabButton = subTabButton("SCORE", -47)
+local blockTabButton = subTabButton("BLOCK", 47)
+
 local closeButton = make("TextButton", {
 	Name = "Close",
 	AnchorPoint = Vector2.new(1, 0),
@@ -986,7 +1014,10 @@ end)
 -- ========================================================================
 -- 8. SHOP UI
 -- ========================================================================
-local shopTab = "shop"   -- "shop" | "top"
+local shopTab = "shop"        -- "shop" | "top"
+local topBoard = "score"      -- "score" | "tile" (TOP 10 alt sekmesi)
+local topRefreshToken = 0     -- otomatik yenileme iptali icin sayac
+local TOP_REFRESH_SECONDS = 150
 
 local function shopRow(height)
 	local t = THEMES[currentTheme]
@@ -1133,14 +1164,21 @@ local function buildTopRows()
 		TextSize = 14,
 		ZIndex = 22,
 	}, loadingRow)
+	topRefreshToken += 1
+	local token = topRefreshToken
+	local board = topBoard
 	task.spawn(function()
-		local res = act({ a = "top" })
-		if not shopModal.Visible or shopTab ~= "top" then return end
+		local res = act({ a = "top", board = board })
+		if not shopModal.Visible or shopTab ~= "top" or token ~= topRefreshToken then return end
 		loadingRow:Destroy()
 		local t = THEMES[currentTheme]
 		local list = (res and res.ok and res.list) or {}
 
-		-- Kolon basliklari: PLAYER | SCORE | BLOCK
+		-- Kolonlar: aktif siralamanin metrigi ortada, digeri sagda
+		local primaryIsTile = (board == "tile")
+		local primaryText = primaryIsTile and "BLOCK" or "SCORE"
+		local secondaryText = primaryIsTile and "SCORE" or "BLOCK"
+
 		local head = make("Frame", {
 			Size = UDim2.new(1, -6, 0, 16),
 			BackgroundTransparency = 1,
@@ -1160,8 +1198,8 @@ local function buildTopRows()
 			}, head)
 		end
 		headLabel("PLAYER", UDim2.fromOffset(10, 0), UDim2.new(0.5, -10, 1, 0), Enum.TextXAlignment.Left)
-		headLabel("SCORE", UDim2.new(0.5, 0, 0, 0), UDim2.new(0.28, 0, 1, 0), Enum.TextXAlignment.Right)
-		headLabel("BLOCK", UDim2.new(0.78, 0, 0, 0), UDim2.new(0.22, -10, 1, 0), Enum.TextXAlignment.Right)
+		headLabel(primaryText, UDim2.new(0.5, 0, 0, 0), UDim2.new(0.28, 0, 1, 0), Enum.TextXAlignment.Right)
+		headLabel(secondaryText, UDim2.new(0.78, 0, 0, 0), UDim2.new(0.22, -10, 1, 0), Enum.TextXAlignment.Right)
 
 		if #list == 0 then
 			local row, rowText = shopRow(40)
@@ -1177,6 +1215,8 @@ local function buildTopRows()
 		else
 			for rank, entry in ipairs(list) do
 				local row, rowText = shopRow(38)
+				local primaryVal = primaryIsTile and entry.tile or entry.score
+				local secondaryVal = primaryIsTile and entry.score or entry.tile
 				make("TextLabel", {
 					Position = UDim2.fromOffset(10, 0),
 					Size = UDim2.new(0.5, -10, 1, 0),
@@ -1194,7 +1234,7 @@ local function buildTopRows()
 					Size = UDim2.new(0.28, 0, 1, 0),
 					BackgroundTransparency = 1,
 					Font = Enum.Font.GothamBlack,
-					Text = tostring(entry.score),
+					Text = (primaryVal and primaryVal > 0) and tostring(primaryVal) or "-",
 					TextColor3 = rowText,
 					TextSize = 13,
 					TextXAlignment = Enum.TextXAlignment.Right,
@@ -1205,7 +1245,7 @@ local function buildTopRows()
 					Size = UDim2.new(0.22, -10, 1, 0),
 					BackgroundTransparency = 1,
 					Font = Enum.Font.GothamBlack,
-					Text = (entry.tile and entry.tile > 0) and tostring(entry.tile) or "-",
+					Text = (secondaryVal and secondaryVal > 0) and tostring(secondaryVal) or "-",
 					TextColor3 = rowText,
 					TextSize = 13,
 					TextXAlignment = Enum.TextXAlignment.Right,
@@ -1237,6 +1277,13 @@ local function buildTopRows()
 			meTileVal.Text = (me.tile and me.tile > 0) and tostring(me.tile) or "-"
 			meBar.Visible = true
 		end
+
+		-- Otomatik yenileme: sekme acik kaldigi surece ~2.5 dk'da bir tazele
+		task.delay(TOP_REFRESH_SECONDS, function()
+			if token == topRefreshToken and S.shopOpen and shopTab == "top" and shopModal.Visible then
+				rebuildShop()
+			end
+		end)
 	end)
 end
 
@@ -1244,16 +1291,43 @@ rebuildShop = function()
 	for _, child in ipairs(shopList:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
-	modalTitle.Text = (shopTab == "shop") and "SHOP" or "TOP 10"
+	local isTop = (shopTab == "top")
+	modalTitle.Text = isTop and "TOP 10" or "SHOP"
 	meBar.Visible = false
-	-- TOP 10 sekmesinde liste, alttaki kisisel bara yer birakir
-	shopList.Size = (shopTab == "top") and UDim2.new(1, 0, 1, -98) or UDim2.new(1, 0, 1, -42)
-	if shopTab == "shop" then
-		buildShopRows()
-	else
+	topSubBar.Visible = isTop
+	if isTop then
+		-- Aktif alt sekme mavi, digeri tema rengi
+		local t = THEMES[currentTheme]
+		local activeB = (topBoard == "score") and scoreTabButton or blockTabButton
+		local idleB = (topBoard == "score") and blockTabButton or scoreTabButton
+		activeB.BackgroundColor3 = ACCENT
+		activeB.TextColor3 = WHITE_TEXT
+		idleB.BackgroundColor3 = t.button
+		idleB.TextColor3 = t.buttonText
+		-- Liste, ustte alt sekmelere ve altta kisisel bara yer birakir
+		shopList.Position = UDim2.new(0, 0, 0, 78)
+		shopList.Size = UDim2.new(1, 0, 1, -134)
 		buildTopRows()
+	else
+		shopList.Position = UDim2.new(0, 0, 0, 42)
+		shopList.Size = UDim2.new(1, 0, 1, -42)
+		buildShopRows()
 	end
 end
+
+scoreTabButton.Activated:Connect(function()
+	if topBoard ~= "score" then
+		topBoard = "score"
+		rebuildShop()
+	end
+end)
+
+blockTabButton.Activated:Connect(function()
+	if topBoard ~= "tile" then
+		topBoard = "tile"
+		rebuildShop()
+	end
+end)
 
 -- Header'daki SHOP / TOP 10 butonlari modali kendi sekmesinde acar;
 -- ayni sekme acikken tekrar basmak kapatir
