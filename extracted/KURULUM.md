@@ -5,7 +5,7 @@
 - **3D karakter tamamen kapalı:** sunucuda `Players.CharacterAutoSpawn = false` + doğan karakter anında kaldırılır; istemcide kamera `Scriptable` kilitlenir. Oyun saf 2D ekran.
 - **UI derinliği:** board, mağaza modalı, stat kutuları ve header butonlarına tema uyumlu ince `UIStroke` (Light `#D0D0D0`, Dark `#3A3A40`, kalınlık 1.5); tema geçişinde stroke da tween'lenir.
 - **Coin ikonu:** HUD ve mağaza fiyat butonlarındaki emoji yerine altın daire + "$" ikonu (asset bağımsız).
-- **Büyük header:** başlık 24pt, üst bar 54px, butonlar 44px yükseklik / 16pt (UNDO 80, NEW 64, SHOP 72, tema 48 genişlik).
+- **Büyük header:** başlık 24pt, üst bar 54px, butonlar 44px yükseklik; sağ küme sırası UNDO / NEW / SHOP / TOP 10 / tema. SHOP ve TOP 10 modali kendi sekmesinde açar, açık sekmenin adı modalda ortada yazar; mağaza fiyatları pill butonlarda (alınabilir: mavi, değil: koyu gri).
 
 ## Kurulum
 
@@ -66,7 +66,8 @@ Roblox'ta "database" = **DataStoreService**. Kurulumu:
 | Swipe (mobil) | Kaydır |
 | UNDO | Son hamleyi geri al (hak varsa) |
 | NEW | Turu bitir (coin kazan), yeni tur |
-| SHOP | Mağaza + TOP 10 |
+| SHOP | Mağaza |
+| TOP 10 | Global leaderboard |
 | 🌙 / ☀️ | Light ↔ Dark tema (kaydedilir) |
 
 ## Temalar

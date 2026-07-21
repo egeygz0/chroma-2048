@@ -362,7 +362,7 @@ local headerTop = make("Frame", {
 
 local title = make("TextLabel", {
 	Name = "Title",
-	Size = UDim2.new(1, -292, 1, 0),
+	Size = UDim2.new(1, -266, 1, 0),
 	BackgroundTransparency = 1,
 	Font = Enum.Font.GothamBlack,
 	Text = "Neon Merge\n2048",
@@ -388,12 +388,15 @@ local function headerButton(name, text, width, rightOffset)
 	return b
 end
 
+-- Sag kume (sagdan sola): tema | TOP 10 | SHOP | NEW | UNDO
 local themeButton = headerButton("ThemeToggle", "🌙", 48, 0)
-local shopButton  = headerButton("Shop", "SHOP", 72, -54)
-local newButton   = headerButton("NewGame", "NEW", 64, -132)
-local undoButton  = headerButton("Undo", "UNDO 0", 80, -202)
+local topButton   = headerButton("Top10", "TOP 10", 68, -54)
+local shopButton  = headerButton("Shop", "SHOP", 62, -128)
+local newButton   = headerButton("NewGame", "NEW", 56, -196)
+local undoButton  = headerButton("Undo", "UNDO 0", 76, -258)
 undoButton.Visible = false
 undoButton.TextSize = 14
+topButton.TextSize = 14
 
 -- Header satir 2: SCORE / BEST / COINS
 local headerStats = make("Frame", {
@@ -604,30 +607,16 @@ make("UIPadding", {
 	PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
 }, shopModal)
 
-local shopTabButton = make("TextButton", {
-	Name = "TabShop",
-	Size = UDim2.fromOffset(80, 34),
-	Font = Enum.Font.GothamBold,
+-- Acik sekmenin adi ortada yazar (sekme butonlari header'a tasindi)
+local modalTitle = make("TextLabel", {
+	Name = "ModalTitle",
+	Size = UDim2.new(1, 0, 0, 34),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
 	Text = "SHOP",
-	TextSize = 15,
-	AutoButtonColor = true,
-	BorderSizePixel = 0,
+	TextSize = 20,
 	ZIndex = 21,
 }, shopModal)
-corner(shopTabButton, TILE_RADIUS)
-
-local topTabButton = make("TextButton", {
-	Name = "TabTop",
-	Position = UDim2.fromOffset(86, 0),
-	Size = UDim2.fromOffset(80, 34),
-	Font = Enum.Font.GothamBold,
-	Text = "TOP 10",
-	TextSize = 15,
-	AutoButtonColor = true,
-	BorderSizePixel = 0,
-	ZIndex = 21,
-}, shopModal)
-corner(topTabButton, TILE_RADIUS)
 
 local closeButton = make("TextButton", {
 	Name = "Close",
@@ -673,9 +662,10 @@ local function applyTheme(name)
 	tween(board, { BackgroundColor3 = t.board })
 	tween(shopModal, { BackgroundColor3 = t.board })
 	tween(title, { TextColor3 = t.text })
-	for _, b in ipairs({ themeButton, shopButton, newButton, undoButton, shopTabButton, topTabButton, closeButton }) do
+	for _, b in ipairs({ themeButton, topButton, shopButton, newButton, undoButton, closeButton }) do
 		tween(b, { BackgroundColor3 = t.button, TextColor3 = t.buttonText })
 	end
+	tween(modalTitle, { TextColor3 = t.text })
 	for _, statFrame in ipairs({ scoreFrame, bestFrame, coinFrame }) do
 		tween(statFrame, { BackgroundColor3 = t.button })
 	end
@@ -721,6 +711,8 @@ local function updateHUD()
 	coinValue.Text = tostring(S.coins)
 	undoButton.Text = "UNDO " .. S.undoLeft
 	undoButton.Visible = (S.up.undo > 0)
+	-- UNDO gorununce baslik alani daralir, buton kumesine tasmaz
+	title.Size = UDim2.new(1, undoButton.Visible and -344 or -266, 1, 0)
 end
 
 local function render(popSet)
@@ -1003,30 +995,30 @@ local function buildShopRows()
 		local buyButton = make("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5),
 			Position = UDim2.new(1, -10, 0.5, 0),
-			Size = UDim2.fromOffset(104, 34),
+			Size = UDim2.fromOffset(104, 36),
 			Font = Enum.Font.GothamBold,
-			TextSize = 13,
+			TextSize = 14,
 			AutoButtonColor = true,
 			BorderSizePixel = 0,
 			ZIndex = 22,
 		}, row)
-		corner(buyButton, TILE_RADIUS)
+		corner(buyButton, 18)   -- tam yuvarlak pill
 		if lv >= item.max then
 			buyButton.Text = "MAX"
 			buyButton.BackgroundColor3 = t.button
 			buyButton.TextColor3 = t.statLabel
 		else
-			-- Fiyat: coin ikonu + tutar (duz emoji yerine ikonlu buton)
+			-- Fiyat pili: koyu zemin + coin ikonu + tutar; alinabilirse mavi
 			local cost = item.costs[lv + 1]
 			buyButton.Text = ""
-			coinIcon(buyButton, 16, 23).Position = UDim2.new(0, 10, 0.5, 0)
+			coinIcon(buyButton, 18, 23).Position = UDim2.new(0, 9, 0.5, 0)
 			local priceLabel = make("TextLabel", {
-				Position = UDim2.new(0, 32, 0, 0),
-				Size = UDim2.new(1, -38, 1, 0),
+				Position = UDim2.new(0, 33, 0, 0),
+				Size = UDim2.new(1, -39, 1, 0),
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				Text = tostring(cost),
-				TextSize = 13,
+				TextSize = 14,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 23,
 			}, buyButton)
@@ -1034,8 +1026,8 @@ local function buildShopRows()
 				buyButton.BackgroundColor3 = ACCENT
 				priceLabel.TextColor3 = WHITE_TEXT
 			else
-				buyButton.BackgroundColor3 = t.button
-				priceLabel.TextColor3 = t.statLabel
+				buyButton.BackgroundColor3 = hex("3A3A40")
+				priceLabel.TextColor3 = hex("9A968F")
 			end
 			buyButton.Activated:Connect(function()
 				local res = act({ a = "buy", id = item.id })
@@ -1153,13 +1145,7 @@ rebuildShop = function()
 	for _, child in ipairs(shopList:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
-	local t = THEMES[currentTheme]
-	local activeTab = (shopTab == "shop") and shopTabButton or topTabButton
-	local idleTab = (shopTab == "shop") and topTabButton or shopTabButton
-	activeTab.BackgroundColor3 = ACCENT
-	activeTab.TextColor3 = WHITE_TEXT
-	idleTab.BackgroundColor3 = t.button
-	idleTab.TextColor3 = t.buttonText
+	modalTitle.Text = (shopTab == "shop") and "SHOP" or "TOP 10"
 	if shopTab == "shop" then
 		buildShopRows()
 	else
@@ -1167,24 +1153,27 @@ rebuildShop = function()
 	end
 end
 
-shopButton.Activated:Connect(function()
+-- Header'daki SHOP / TOP 10 butonlari modali kendi sekmesinde acar;
+-- ayni sekme acikken tekrar basmak kapatir
+local function toggleModal(tab)
 	if not S.loaded then return end
-	S.shopOpen = not S.shopOpen
-	shopModal.Visible = S.shopOpen
-	if S.shopOpen then
-		shopTab = "shop"
-		rebuildShop()
+	if S.shopOpen and shopTab == tab then
+		S.shopOpen = false
+		shopModal.Visible = false
+		return
 	end
+	shopTab = tab
+	S.shopOpen = true
+	shopModal.Visible = true
+	rebuildShop()
+end
+
+shopButton.Activated:Connect(function()
+	toggleModal("shop")
 end)
 
-shopTabButton.Activated:Connect(function()
-	shopTab = "shop"
-	rebuildShop()
-end)
-
-topTabButton.Activated:Connect(function()
-	shopTab = "top"
-	rebuildShop()
+topButton.Activated:Connect(function()
+	toggleModal("top")
 end)
 
 closeButton.Activated:Connect(function()
